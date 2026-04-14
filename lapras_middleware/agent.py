@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class Agent:
     """Simplified agent class with local state and MQTT communication."""
     
-    def __init__(self, agent_id: str, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, agent_id: str, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         """Initialize the agent with an ID and MQTT connection."""
         self.agent_id = agent_id
         self.local_state: Dict[str, Any] = {}

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class VirtualAgent(Agent, ABC):
     """Base class for virtual agents that manage multiple sensors and actuators."""
     
-    def __init__(self, agent_id: str, agent_type: str, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, agent_id: str, agent_type: str, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         self.agent_type = agent_type
         self.sensor_data: Dict[str, Dict[str, Any]] = {}  # Store sensor data by sensor_id
         self.sensor_agents: List[str] = []  # List of sensor IDs managed by this virtual agent

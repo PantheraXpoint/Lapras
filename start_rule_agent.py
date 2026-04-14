@@ -25,7 +25,7 @@ class RuleAgent:
     Acts as a bridge between dashboard and the rule management system.
     """
 
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         """Initialize the rule agent service."""
         self.service_id = "RuleAgent"
         

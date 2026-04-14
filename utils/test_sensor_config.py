@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from lapras_middleware.event import EventFactory, MQTTMessage
 
-def send_sensor_config_command(agent_id, action, sensor_config=None, mqtt_broker="143.248.57.73", mqtt_port=1883):
+def send_sensor_config_command(agent_id, action, sensor_config=None, mqtt_broker="143.248.55.82", mqtt_port=1883):
     """Send a sensor configuration command to a virtual agent."""
     
     # Create the event
@@ -67,7 +67,7 @@ def main():
                        help='Configuration action to perform')
     parser.add_argument('--sensors', nargs='*',
                        help='Sensor configuration. Format: sensor_type:sensor1,sensor2')
-    parser.add_argument('--mqtt-broker', default="143.248.57.73",
+    parser.add_argument('--mqtt-broker', default="143.248.55.82",
                        help='MQTT broker address')
     parser.add_argument('--mqtt-port', type=int, default=1883,
                        help='MQTT broker port')

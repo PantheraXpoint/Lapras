@@ -16,7 +16,7 @@ class LightSensorAgent(MonnitSensorAgent):
     
     def __init__(self, virtual_agent_id: str = "any",
                  sunlight_threshold: float = 1000.0, indoor_threshold: float = 10.0,
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         
         # Light thresholds (configurable)
         # sunlight_threshold: lux level above which it's considered sunlight

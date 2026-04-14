@@ -14,7 +14,7 @@ from st_bridge import bridge
 import pandas as pd
 from datetime import datetime
 
-# mqtt_broker = "143.248.57.73"  # MQTT broker address
+# mqtt_broker = "143.248.55.82"  # MQTT broker address
 # mqtt_port = 1883
 
 # # Create the client object before connecting to the broker
@@ -38,7 +38,7 @@ def main():
         st.info("Initializing MQTT client...")
 
         try:
-            mqtt_broker = "143.248.57.73"  # MQTT broker address
+            mqtt_broker = "143.248.55.82"  # MQTT broker address
             mqtt_port = 1883
 
             # Create the client object before connecting to the broker

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class ContextRuleManager:
     """Combined context manager and rule executor that processes context states and applies rules."""
 
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, rule_files: Optional[List[str]] = None):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883, rule_files: Optional[List[str]] = None):
         """Initialize the combined context rule manager."""
         self.service_id = "ContextRuleManager"
         

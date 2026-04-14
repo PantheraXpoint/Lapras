@@ -19,7 +19,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 logger = logging.getLogger(__name__)
 
 class DashboardAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "dashboard", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
+    def __init__(self, agent_id: str = "dashboard", mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 2.0):
         
         # Initialize attributes that might be accessed by perception thread first

@@ -4,7 +4,7 @@
 This document describes the MQTT interface available for dashboard development in the lapras-py IoT system. The system uses a unified Event structure for all MQTT communications, providing consistent message formats across the entire system.
 
 ## MQTT Broker Connection
-- **Host**: `143.248.57.73`  
+- **Host**: `143.248.55.82`  
 - **Port**: `1883` (MQTT) / `9001` (WebSocket for web dashboards)
 - **QoS**: 1 (reliable delivery recommended)
 
@@ -166,7 +166,7 @@ import uuid
 from typing import Dict, Any, Callable, Optional
 
 class DashboardClient:
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port
         self.current_state = {}
@@ -300,15 +300,15 @@ dashboard.send_command("VA-Light-Kitchen", "set_brightness", {"brightness": 80})
 ### Monitor Dashboard Topics
 ```bash
 # Subscribe to all dashboard topics
-mosquitto_sub -h 143.248.57.73 -t "dashboard/#" -v
+mosquitto_sub -h 143.248.55.82 -t "dashboard/#" -v
 
 # Monitor state updates only
-mosquitto_sub -h 143.248.57.73 -t "dashboard/context/state" -v
+mosquitto_sub -h 143.248.55.82 -t "dashboard/context/state" -v
 ```
 
 ### Send Test Command
 ```bash
-mosquitto_pub -h 143.248.57.73 -t "dashboard/control/command" -m '{
+mosquitto_pub -h 143.248.55.82 -t "dashboard/control/command" -m '{
   "event": {
     "id": "test-001",
     "timestamp": "2024-01-15T10:31:00Z", 

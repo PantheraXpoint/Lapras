@@ -23,8 +23,8 @@ def main():
                         help='Virtual agent ID to publish to (default: any)')
     parser.add_argument('--tilt-threshold', type=float, default=30.0,
                         help='Tilt threshold in degrees (default: 30.0)')
-    parser.add_argument('--mqtt-broker', type=str, default="143.248.57.73",
-                        help='MQTT broker address (default: 143.248.57.73)')
+    parser.add_argument('--mqtt-broker', type=str, default="143.248.55.82",
+                        help='MQTT broker address (default: 143.248.55.82)')
     parser.add_argument('--mqtt-port', type=int, default=1883,
                         help='MQTT broker port (default: 1883)')
     

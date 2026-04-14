@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class RuleAgentTester:
     """Enhanced test client for the Rule Agent service."""
     
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         """Initialize the tester."""
         # Use unique client ID to prevent conflicts
         self.client_id = f"RuleAgentTester_{int(time.time())}_{str(uuid.uuid4())[:8]}"
@@ -235,7 +235,7 @@ class RuleAgentTester:
             print(f"❌ Error sending request: {e}")
             return None
     
-    def reconnect_manually(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def reconnect_manually(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         """Manually reconnect to MQTT broker."""
         print("🔄 Manual reconnection requested...")
         

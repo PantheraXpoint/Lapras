@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class EnhancedDashboardSubscriber:
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         """Initialize the enhanced dashboard subscriber."""
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port

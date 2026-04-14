@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime
 
 class SensorTopicMonitor:
-    def __init__(self, mqtt_broker="143.248.57.73", mqtt_port=1883):
+    def __init__(self, mqtt_broker="143.248.55.82", mqtt_port=1883):
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port
         self.sensor_data = defaultdict(lambda: {"last_seen": None, "count": 0, "latest_value": None})
@@ -148,7 +148,7 @@ class SensorTopicMonitor:
 
 def main():
     parser = argparse.ArgumentParser(description='Monitor sensor MQTT topics to verify publishing')
-    parser.add_argument('--mqtt-broker', default="143.248.57.73", help='MQTT broker address')
+    parser.add_argument('--mqtt-broker', default="143.248.55.82", help='MQTT broker address')
     parser.add_argument('--mqtt-port', type=int, default=1883, help='MQTT broker port')
     parser.add_argument('--duration', type=int, help='Monitor duration in seconds (default: indefinite)')
     parser.add_argument('--summary-only', action='store_true', help='Show summary after monitoring')

@@ -16,7 +16,7 @@ class TemperatureSensorAgent(MonnitSensorAgent):
     
     def __init__(self, virtual_agent_id: str = "any", 
                  hot_threshold: float = 28.0, cold_threshold: float = 22.0,
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         
         # Temperature thresholds (configurable)
         self.hot_threshold = hot_threshold

@@ -36,7 +36,7 @@ class MonnitSensorAgent(SensorAgent, ABC):
     }
     
     def __init__(self, sensor_type: str, virtual_agent_id: str = "any",
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         self.monnit_sensor_type = sensor_type
         self.network_id = self.NETWORK_ID
         

@@ -21,7 +21,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager
 logger = logging.getLogger(__name__)
 
 class InteractiveSensorConfigDashboard:
-    def __init__(self, mqtt_broker="143.248.57.73", mqtt_port=1883):
+    def __init__(self, mqtt_broker="143.248.55.82", mqtt_port=1883):
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port
         self.running = True

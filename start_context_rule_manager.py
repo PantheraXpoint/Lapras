@@ -29,7 +29,7 @@ class ContextRuleService:
         try:
             # Initialize context rule manager with rule files
             self.context_rule_manager = ContextRuleManager(
-                mqtt_broker="143.248.57.73",
+                mqtt_broker="143.248.55.82",
                 mqtt_port=1883,
                 rule_files=self.rule_files
             )
@@ -118,8 +118,8 @@ def main():
                        help='Rule files to load (supports wildcards). Example: --rules lapras_middleware/rules/*.ttl')
     parser.add_argument('--rules-dir', 
                        help='Directory to load all .ttl files from')
-    parser.add_argument('--mqtt-broker', default="143.248.57.73",
-                       help='MQTT broker address (default: 143.248.57.73)')
+    parser.add_argument('--mqtt-broker', default="143.248.55.82",
+                       help='MQTT broker address (default: 143.248.55.82)')
     parser.add_argument('--mqtt-port', type=int, default=1883,
                        help='MQTT broker port (default: 1883)')
     

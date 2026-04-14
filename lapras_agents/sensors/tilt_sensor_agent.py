@@ -16,7 +16,7 @@ class TiltSensorAgent(MonnitSensorAgent):
     
     def __init__(self, virtual_agent_id: str = "any", 
                  tilt_threshold: float = 30.0,
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         
         # Tilt threshold in degrees (configurable)
         self.tilt_threshold = tilt_threshold

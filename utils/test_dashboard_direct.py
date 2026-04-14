@@ -35,7 +35,7 @@ def main():
     
     try:
         # Connect
-        mqtt_client.connect("143.248.57.73", 1883)
+        mqtt_client.connect("143.248.55.82", 1883)
         mqtt_client.loop_start()
         time.sleep(2)
         

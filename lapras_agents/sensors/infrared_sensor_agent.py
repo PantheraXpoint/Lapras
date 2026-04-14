@@ -21,7 +21,7 @@ class InfraredSensorAgent(SensorAgent):
     """Infrared distance sensor agent using Phidget sensor with multiple channels."""
 
     def __init__(self, sensor_id: str = "infrared", virtual_agent_id: str = "aircon", channel: int = 1,
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         
         # Thread-safe initialization flag
         self.hardware_ready = threading.Event()  # Starts as "not set"

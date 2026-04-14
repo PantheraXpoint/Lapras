@@ -14,7 +14,7 @@ class MotionSensorAgent(MonnitSensorAgent):
     """Motion sensor agent using Monnit motion sensors."""
     
     def __init__(self, virtual_agent_id: str = "any",
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         
         # Initialize parent class
         super().__init__("motion", virtual_agent_id, mqtt_broker, mqtt_port)

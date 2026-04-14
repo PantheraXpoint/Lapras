@@ -37,8 +37,8 @@ def main():
                        help='Agent ID for the event venue agent (default: auto-determined by preset)')
     parser.add_argument('--transmission-interval', type=float, default=0.5,
                        help='Transmission interval to context manager in seconds (default: 0.5)')
-    parser.add_argument('--mqtt-broker', default="143.248.57.73",
-                       help='MQTT broker address (default: 143.248.57.73)')
+    parser.add_argument('--mqtt-broker', default="143.248.55.82",
+                       help='MQTT broker address (default: 143.248.55.82)')
     parser.add_argument('--mqtt-port', type=int, default=1883,
                        help='MQTT broker port (default: 1883)')
     parser.add_argument('--sensors', '-s', nargs='*',

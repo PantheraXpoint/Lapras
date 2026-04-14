@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class RulesMonitor:
     """Monitor rule management commands and results."""
     
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883):
         """Initialize the rules monitor."""
         self.client_id = "RulesMonitor"
         self.mqtt_client = mqtt.Client(client_id=self.client_id)
