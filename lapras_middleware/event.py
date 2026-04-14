@@ -391,6 +391,55 @@ class EventFactory:
         )
 
     @staticmethod
+    def create_dashboard_control_mode_command_event(
+        mode: Optional[str] = None,
+        action: str = "set",
+        source_entity_id: str = "Dashboard",
+    ) -> Event:
+        """Create a dashboardControlModeCommand event for manual/automated mode switching."""
+        payload: Dict[str, Any] = {"action": action}
+        if mode is not None:
+            payload["mode"] = mode
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardControlModeCommand"
+            ),
+            source=EntityInfo(
+                entityType="dashboard",
+                entityId=source_entity_id
+            ),
+            payload=payload
+        )
+
+    @staticmethod
+    def create_dashboard_control_mode_result_event(
+        command_id: str,
+        success: bool,
+        mode: str,
+        message: str,
+    ) -> Event:
+        """Create a dashboardControlModeResult event for mode command responses."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardControlModeResult"
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "mode": mode,
+                "message": message,
+            }
+        )
+
+    @staticmethod
     def create_dashboard_state_update_event(
         agents: Dict[str, Any],
         summary: Dict[str, Any]
@@ -633,6 +682,16 @@ class TopicManager:
     def dashboard_control_result() -> str:
         """Topic for dashboard control command results."""
         return "dashboard/control/result"
+
+    @staticmethod
+    def dashboard_control_mode_command() -> str:
+        """Topic for explicit control mode commands from dashboard."""
+        return "dashboard/control/mode/command"
+
+    @staticmethod
+    def dashboard_control_mode_result() -> str:
+        """Topic for explicit control mode command results."""
+        return "dashboard/control/mode/result"
     
     @staticmethod
     def dashboard_context_state() -> str:

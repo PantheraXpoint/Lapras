@@ -17,7 +17,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
+    def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 0.1, 
                  light_threshold: float = 4000.0):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
@@ -44,6 +44,14 @@ class LightHueAgent(VirtualAgent):
         self.transmission_interval = transmission_interval  # seconds between transmissions
         self.last_transmission_time = 0.0
         self.pending_state_update = False
+
+        # Minimal mode scaffold for consistent cross-agent controls.
+        self.mode_profiles = {
+            "normal": {"description": "default brightness logic"},
+            "focus": {"description": "brighter task-oriented profile"},
+            "relax": {"description": "softer ambient profile"},
+        }
+        self.current_mode = "normal"
         
         # Initialize local state - check actual light status first
         actual_power_state = self.__check_current_light_state()
@@ -55,6 +63,7 @@ class LightHueAgent(VirtualAgent):
             "activity_detected": False,
             "light_status": "unknown",  # bright or dark
             "light_threshold": self.light_threshold_config["threshold"],  # Expose current threshold
+            "mode_name": self.current_mode,
         })
         
         logger.info(f"[{self.agent_id}] Initialized with actual light state: {actual_power_state}")
@@ -569,6 +578,29 @@ class LightHueAgent(VirtualAgent):
                     
         return False, actual_state, f"Verification failed after {max_retries} attempts: expected '{expected_state}', got '{actual_state}'"
 
+    def _change_mode(self, new_mode: str) -> dict:
+        mode = (new_mode or "").strip().lower()
+        if mode not in self.mode_profiles:
+            return {
+                "success": False,
+                "message": f"Unsupported mode '{new_mode}'. Available modes: {sorted(self.mode_profiles.keys())}",
+                "new_state": {},
+            }
+
+        old_mode = self.current_mode
+        self.current_mode = mode
+        with self.state_lock:
+            self.local_state["mode_name"] = mode
+
+        return {
+            "success": True,
+            "message": f"Mode changed from {old_mode} to {mode}",
+            "new_state": {
+                "mode_name": mode,
+                "mode_profile": self.mode_profiles[mode],
+            },
+        }
+
     def execute_action(self, action_payload: ActionPayload) -> dict:
         """Execute light control actions and verify actual state before reporting back."""
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
@@ -647,6 +679,18 @@ class LightHueAgent(VirtualAgent):
                 
                 # Always trigger state publication with verified state
                 self._trigger_state_publication()
+
+            elif action_payload.actionName == "change_mode":
+                mode = action_payload.parameters.get("mode") if action_payload.parameters else None
+                if not mode:
+                    result = {
+                        "success": False,
+                        "message": "Missing 'mode' parameter for change_mode action",
+                        "new_state": {},
+                    }
+                else:
+                    result = self._change_mode(mode)
+                    self._trigger_state_publication()
                 
             else:
                 result = {

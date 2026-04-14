@@ -16,7 +16,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 logger = logging.getLogger(__name__)
 
 class ClubHouseAgent(VirtualAgent):
-    def __init__(self, agent_id: str = None, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
+    def __init__(self, agent_id: str = None, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 0.5,
                  preset_mode: str = "all-normal"):
         
@@ -95,9 +95,9 @@ class ClubHouseAgent(VirtualAgent):
             "light_status": "unknown",
             "temperature_status": "unknown",
             "door_status": "unknown",
-            "preset_mode": self.preset_mode,
             "light_power": "off",
-            "aircon_power": "off"
+            "aircon_power": "off",
+            **self._build_mode_state_fields(),
         })
         
         self.sensor_data = defaultdict(dict)
@@ -214,6 +214,47 @@ class ClubHouseAgent(VirtualAgent):
             logger.info(f"[{self.agent_id}] Configured for {self.preset_mode}: light_group={self.light_group}, ir_devices={self.ir_device_serials}, aircon_mode={self.aircon_mode}")
         else:
             logger.info(f"[{self.agent_id}] Configured for {self.preset_mode}: light_group={self.light_group}, ir_device={self.ir_device_serial}, temp_cmd={self.aircon_temp_command}")
+
+    def _extract_position_mode(self):
+        """Return (position, mode) derived from current preset_mode string."""
+        if "back" in self.preset_mode:
+            position = "back"
+        elif "front" in self.preset_mode:
+            position = "front"
+        elif "all" in self.preset_mode:
+            position = "all"
+        else:
+            position = "unknown"
+
+        if "nap" in self.preset_mode:
+            mode = "nap"
+        elif "read" in self.preset_mode:
+            mode = "read"
+        elif "normal" in self.preset_mode:
+            mode = "normal"
+        elif "clean" in self.preset_mode:
+            mode = "clean"
+        else:
+            mode = "unknown"
+        return position, mode
+
+    def _build_mode_state_fields(self):
+        """Build rich mode/profile state fields for immediate UI visibility."""
+        position, mode = self._extract_position_mode()
+        fields = {
+            "preset_mode": self.preset_mode,
+            "preset_position": position,
+            "mode_name": mode,
+            "light_group": getattr(self, "light_group", ""),
+            "light_profile_bri": (self.light_settings or {}).get("bri"),
+            "light_profile_hue": (self.light_settings or {}).get("hue"),
+            "light_profile_sat": (self.light_settings or {}).get("sat"),
+        }
+        if hasattr(self, "aircon_mode"):
+            fields["aircon_profile_mode"] = self.aircon_mode
+        if hasattr(self, "aircon_temp_command"):
+            fields["aircon_profile_temp_command"] = self.aircon_temp_command
+        return fields
     
     def _test_light_controller(self):
         """Test if the Hue bridge is accessible."""
@@ -883,17 +924,10 @@ class ClubHouseAgent(VirtualAgent):
     def _change_mode(self, new_mode: str) -> dict:
         """Change the agent's mode (nap, read, normal, clean) and reconfigure settings."""
         try:
-            # Extract current position from preset_mode
-            if "back" in self.preset_mode:
+            position, _ = self._extract_position_mode()
+            if position == "unknown":
                 position = "back"
-            elif "front" in self.preset_mode:
-                position = "front"
-            elif "all" in self.preset_mode:
-                position = "all"
-            else:
-                position = "back"  # fallback
-            
-            # Create new preset_mode
+
             old_preset_mode = self.preset_mode
             if position == "all":
                 if new_mode in ["normal", "clean"]:
@@ -916,10 +950,15 @@ class ClubHouseAgent(VirtualAgent):
             
             # Reconfigure settings with new mode
             self._configure_preset_settings()
-            
-            # Update local state
+
+            mode_state_fields = self._build_mode_state_fields()
             with self.state_lock:
-                self.local_state["preset_mode"] = self.preset_mode
+                self.local_state.update(mode_state_fields)
+                currently_powered_on = (
+                    self.local_state.get("power") == "on"
+                    or self.local_state.get("light_power") == "on"
+                    or self.local_state.get("aircon_power") == "on"
+                )
             
             logger.info(f"[{self.agent_id}] Mode changed: {old_preset_mode} → {self.preset_mode}")
             logger.info(f"[{self.agent_id}] New light settings: brightness={self.light_settings['bri']}, hue={self.light_settings['hue']}")
@@ -927,11 +966,32 @@ class ClubHouseAgent(VirtualAgent):
                 logger.info(f"[{self.agent_id}] New aircon temp command: {self.aircon_temp_command}")
             elif hasattr(self, 'aircon_mode'):
                 logger.info(f"[{self.agent_id}] New aircon mode: {self.aircon_mode}")
+
+            new_state = dict(mode_state_fields)
+            message = f"Mode changed from {old_preset_mode} to {self.preset_mode}"
+
+            # Immediate visibility path: if powered on, reapply current profile right away.
+            if currently_powered_on:
+                light_result = self.__turn_on_lights()
+                aircon_result = self.__turn_on_aircon()
+                overall_success = light_result["success"] and aircon_result["success"]
+                applied_state = {
+                    "power": "on" if overall_success else "partial",
+                    "light_power": light_result.get("new_state", {}).get("light_power", self.local_state.get("light_power", "unknown")),
+                    "aircon_power": aircon_result.get("new_state", {}).get("aircon_power", self.local_state.get("aircon_power", "unknown")),
+                }
+                with self.state_lock:
+                    self.local_state.update(applied_state)
+                new_state.update(applied_state)
+                message += (
+                    f"; profile applied immediately while powered on "
+                    f"(light: {light_result['message']}; aircon: {aircon_result['message']})"
+                )
             
             return {
                 "success": True,
-                "message": f"Mode changed from {old_preset_mode} to {self.preset_mode}",
-                "new_state": {"preset_mode": self.preset_mode}
+                "message": message,
+                "new_state": new_state,
             }
             
         except Exception as e:

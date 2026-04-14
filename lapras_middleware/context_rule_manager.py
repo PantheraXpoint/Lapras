@@ -2,7 +2,7 @@ import logging
 import time
 import json
 import threading
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 import uuid
 import os
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ContextRuleManager:
     """Combined context manager and rule executor that processes context states and applies rules."""
 
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, rule_files: Optional[List[str]] = None):
+    def __init__(self, mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883, rule_files: Optional[List[str]] = None):
         """Initialize the combined context rule manager."""
         self.service_id = "ContextRuleManager"
         
@@ -80,11 +80,10 @@ class ContextRuleManager:
         self.extended_window_lock = threading.Lock()
         # Fast state change: 15.0 for quick OFF response | Stable state: 60.0 for longer device ON time
         self.EXTENDED_WINDOW_DURATION = 60.0  # 60 seconds (change to 15.0 for fast OFF response)
-        
-        # Manual override tracking - REQUIREMENT: 120 to maintain manual state
-        self.manual_override_agents: Dict[str, float] = {}  # agent_id -> override_expiry_time
-        self.manual_override_lock = threading.Lock()
-        self.MANUAL_OVERRIDE_DURATION = 120.0  # 120 seconds override after manual command
+
+        # Explicit demo control mode. In manual mode, rule-driven actuation is suppressed.
+        self._control_mode = "automated"
+        self._control_mode_lock = threading.Lock()
         
         # Track agents needing mode detection (for startup when agents aren't connected yet)
         self.pending_mode_detection: set = set()  # Set of agent_ids that need mode detection
@@ -165,6 +164,11 @@ class ContextRuleManager:
             threshold_config_result_pattern = "agent/+/thresholdConfig/result"
             result8 = self.mqtt_client.subscribe(threshold_config_result_pattern, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to threshold config result pattern: {threshold_config_result_pattern} (result: {result8})")
+
+            # Subscribe to explicit control mode commands
+            control_mode_topic = TopicManager.dashboard_control_mode_command()
+            result9 = self.mqtt_client.subscribe(control_mode_topic, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to control mode topic: {control_mode_topic} (result: {result9})")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
@@ -179,12 +183,55 @@ class ContextRuleManager:
         else:
             logger.info(f"[{self.service_id}] MQTT client disconnected normally")
 
+    def get_control_mode(self) -> str:
+        with self._control_mode_lock:
+            return self._control_mode
+
+    def _set_control_mode(self, mode: str) -> None:
+        with self._control_mode_lock:
+            self._control_mode = mode
+
+    def _normalized_control_agents(self) -> Set[str]:
+        return {aid for aid in self.known_agents if aid in {"aircon", "hue_light", "all", "back", "front"}}
+
+    def _validate_control_topology(self, running_agents: Optional[Set[str]] = None) -> Optional[str]:
+        running = set(running_agents if running_agents is not None else self._normalized_control_agents())
+        if not running:
+            return None
+
+        allowed = {
+            frozenset({"aircon"}),
+            frozenset({"hue_light"}),
+            frozenset({"all"}),
+            frozenset({"back"}),
+            frozenset({"front"}),
+            frozenset({"aircon", "hue_light"}),
+            frozenset({"back", "front"}),
+        }
+        if frozenset(running) in allowed:
+            return None
+
+        if "all" in running and ("back" in running or "front" in running):
+            return "Invalid running combo: 'all' cannot run with 'back' or 'front'."
+        if (running & {"aircon", "hue_light"}) and (running & {"all", "back", "front"}):
+            return (
+                "Invalid running combo: split agents (aircon/hue_light) "
+                "cannot run with clubhouse agents (all/back/front)."
+            )
+        return f"Invalid running combo: {sorted(running)} (allowed: aircon, hue_light, aircon+hue_light, all, back, front, back+front)."
+
     def _on_message(self, client, userdata, msg):
         """Callback when message is received from virtual agents or dashboard."""
         logger.info(f"[{self.service_id}] DEBUG: Message received on topic '{msg.topic}' with QoS {msg.qos}")
         logger.debug(f"[{self.service_id}] Message payload: {msg.payload.decode()[:200]}...")  # First 200 chars
         
         try:
+            # Check if it's an explicit control mode command
+            if msg.topic == TopicManager.dashboard_control_mode_command():
+                logger.info(f"[{self.service_id}] DEBUG: Processing control mode command")
+                self._handle_control_mode_command(msg.payload.decode())
+                return
+
             # Check if it's a dashboard control command
             if msg.topic == TopicManager.dashboard_control_command():
                 logger.info(f"[{self.service_id}] DEBUG: Processing dashboard control command")
@@ -263,6 +310,88 @@ class ContextRuleManager:
             logger.error(f"[{self.service_id}] Error processing message on topic '{msg.topic}': {e}", exc_info=True)
             logger.error(f"[{self.service_id}] Message payload that caused error: {msg.payload.decode(errors='ignore')}")
 
+    def _handle_control_mode_command(self, message_payload: str):
+        """Handle explicit manual/automated control mode commands from dashboard."""
+        command_id = "unknown"
+        try:
+            event = MQTTMessage.deserialize(message_payload)
+            command_id = event.event.id
+            payload = event.payload if isinstance(event.payload, dict) else {}
+
+            if event.event.type != "dashboardControlModeCommand":
+                self._publish_control_mode_result(
+                    command_id=command_id,
+                    success=False,
+                    mode=self.get_control_mode(),
+                    message=f"Expected dashboardControlModeCommand, got: {event.event.type}",
+                )
+                return
+
+            action = str(payload.get("action", "set")).strip().lower()
+            requested_mode = payload.get("mode")
+
+            if action == "get":
+                self._publish_control_mode_result(
+                    command_id=command_id,
+                    success=True,
+                    mode=self.get_control_mode(),
+                    message="Control mode query success.",
+                )
+                return
+
+            if not isinstance(requested_mode, str):
+                self._publish_control_mode_result(
+                    command_id=command_id,
+                    success=False,
+                    mode=self.get_control_mode(),
+                    message="Missing mode; expected 'manual' or 'automated'.",
+                )
+                return
+
+            mode = requested_mode.strip().lower()
+            if mode not in {"manual", "automated"}:
+                self._publish_control_mode_result(
+                    command_id=command_id,
+                    success=False,
+                    mode=self.get_control_mode(),
+                    message=f"Invalid mode '{requested_mode}'. Expected manual|automated.",
+                )
+                return
+
+            old_mode = self.get_control_mode()
+            self._set_control_mode(mode)
+            logger.info(f"[{self.service_id}] CONTROL MODE changed: {old_mode} -> {mode}")
+            # Push the new mode into dashboard state payload immediately.
+            self._publish_dashboard_state_update()
+            self._publish_control_mode_result(
+                command_id=command_id,
+                success=True,
+                mode=mode,
+                message=f"Control mode set to {mode}.",
+            )
+
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error processing control mode command: {e}", exc_info=True)
+            self._publish_control_mode_result(
+                command_id=command_id,
+                success=False,
+                mode=self.get_control_mode(),
+                message=f"Error: {str(e)}",
+            )
+
+    def _publish_control_mode_result(self, command_id: str, success: bool, mode: str, message: str):
+        try:
+            result_event = EventFactory.create_dashboard_control_mode_result_event(
+                command_id=command_id,
+                success=success,
+                mode=mode,
+                message=message,
+            )
+            topic = TopicManager.dashboard_control_mode_result()
+            self.mqtt_client.publish(topic, MQTTMessage.serialize(result_event), qos=1)
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error publishing control mode result: {e}", exc_info=True)
+
     def _handle_dashboard_control_command(self, message_payload: str):
         """Handle manual control command from dashboard via MQTT."""
         try:
@@ -292,6 +421,21 @@ class ContextRuleManager:
                 logger.warning(f"[{self.service_id}] Dashboard command for unknown agent: {agent_id}")
                 self._publish_dashboard_command_result(command_id, False, f"Agent {agent_id} not found", agent_id)
                 return
+
+            topology_error = self._validate_control_topology()
+            if topology_error:
+                self._publish_dashboard_command_result(command_id, False, topology_error, agent_id)
+                return
+
+            current_mode = self.get_control_mode()
+            if action_name in {"turn_on", "turn_off"} and current_mode != "manual":
+                self._publish_dashboard_command_result(
+                    command_id,
+                    False,
+                    f"Manual command '{action_name}' rejected: control_mode is '{current_mode}'. Switch to manual mode first.",
+                    agent_id,
+                )
+                return
             
             # Create and send action command
             action_event = EventFactory.create_action_event(
@@ -300,10 +444,6 @@ class ContextRuleManager:
                 parameters={**parameters, "skip_verification": True} if parameters else {"skip_verification": True},
                 priority=priority
             )
-
-            # Record manual override - NEW
-            with self.manual_override_lock:
-                self.manual_override_agents[agent_id] = time.time() + self.MANUAL_OVERRIDE_DURATION
             
             # Send to virtual agent using direct MQTT publish for manual commands (bypass redundancy check)
             action_topic = TopicManager.context_to_virtual_action(agent_id)
@@ -321,7 +461,7 @@ class ContextRuleManager:
             logger.info(f"[{self.service_id}] DASHBOARD COMMAND sent to {agent_id}: {action_name}")
             logger.info(f"[{self.service_id}] Action topic: {action_topic}")
             logger.info(f"[{self.service_id}] Action event ID: {action_event.event.id}")
-            logger.info(f"[{self.service_id}] Manual override active for {self.MANUAL_OVERRIDE_DURATION}s")
+            logger.info(f"[{self.service_id}] Control mode at dispatch: {current_mode}")
             if parameters:
                 logger.info(f"[{self.service_id}] Command parameters: {parameters}")
             logger.info(f"[{self.service_id}] Command ID: {action_event.event.id}, Priority: {priority}")
@@ -369,33 +509,12 @@ class ContextRuleManager:
             
             logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE received from '{agent_id}'")
             
-            # Check manual override status - NEW
-            manual_override_active = False
-            with self.manual_override_lock:
-                override_expiry = self.manual_override_agents.get(agent_id)
-                if override_expiry and time.time() < override_expiry:
-                    manual_override_active = True
-                    remaining_time = override_expiry - time.time()
-                    logger.info(f"[{self.service_id}] ⚠️  CONTEXT UPDATE: Manual override active for '{agent_id}' ({remaining_time:.1f}s remaining)")
-                elif override_expiry and time.time() >= override_expiry:
-                    # Override expired, remove it
-                    del self.manual_override_agents[agent_id]
-                    logger.info(f"[{self.service_id}] Manual override expired for '{agent_id}' - automatic rules now resume")
-            
             # Check if this is a new agent that needs delayed mode detection
             is_new_agent = agent_id not in self.known_agents
             
             # Update context map
             with self.context_lock:
                 new_state = context_payload.state.copy()
-                
-                # During manual override, allow all state changes to come through
-                # This ensures manual commands are properly reflected in the system state
-                if manual_override_active:
-                    logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE: Manual override active for '{agent_id}' - accepting state update as-is: {new_state.get('power', 'unknown')}")
-                else:
-                    logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE: No manual override for '{agent_id}' - normal state update: {new_state.get('power', 'unknown')}")
-                
                 self.context_map[agent_id] = {
                     "state": new_state,
                     "agent_type": context_payload.agent_type,
@@ -435,8 +554,10 @@ class ContextRuleManager:
             # Only apply rules if there are rules relevant to this agent
             has_relevant_rules = any(agent_id in os.path.basename(rule_file) for rule_file in self.loaded_rule_files)
             if has_relevant_rules:
-                # Immediately apply rules for this agent (will be skipped during override)
-                logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE: About to apply rules for '{agent_id}' - manual override: {manual_override_active}")
+                logger.info(
+                    f"[{self.service_id}] 📨 CONTEXT UPDATE: About to apply rules for '{agent_id}' "
+                    f"(control_mode={self.get_control_mode()})"
+                )
                 self._apply_rules_for_agent(agent_id, new_state, event.event.timestamp)
             else:
                 logger.debug(f"[{self.service_id}] 📨 CONTEXT UPDATE: No relevant rules for agent '{agent_id}' - skipping rule evaluation")
@@ -461,10 +582,14 @@ class ContextRuleManager:
                     }
                 
                 # Prepare summary data
+                topology_error = self._validate_control_topology()
                 summary_data = {
                     "total_agents": len(self.context_map),
                     "known_agents": list(self.known_agents),
-                    "last_update": time.time()
+                    "last_update": time.time(),
+                    "control_mode": self.get_control_mode(),
+                    "topology_valid": topology_error is None,
+                    "topology_error": topology_error or "",
                 }
                 
                 # Create Event structure for dashboard state
@@ -503,61 +628,55 @@ class ContextRuleManager:
             logger.error(f"[{self.service_id}] Error handling action report: {e}", exc_info=True)
 
     def _apply_rules_for_agent(self, agent_id: str, current_state: Dict[str, Any], timestamp: Any):
-        """Apply rules for a specific agent with manual override check."""
+        """Apply rules for a specific agent when control mode/topology permit it."""
         try:
-            # Check if manual override is active (but don't block rule evaluation)
-            manual_override_active = False
-            remaining_time = 0
-            with self.manual_override_lock:
-                override_expiry = self.manual_override_agents.get(agent_id)
-                if override_expiry and time.time() < override_expiry:
-                    manual_override_active = True
-                    remaining_time = override_expiry - time.time()
-                    logger.info(f"[{self.service_id}] ⚠️  MANUAL OVERRIDE ACTIVE for '{agent_id}' ({remaining_time:.1f}s remaining) - rules will be evaluated but OFF commands blocked")
-                elif override_expiry and time.time() >= override_expiry:
-                    # Override expired, remove it
-                    del self.manual_override_agents[agent_id]
-                    logger.info(f"[{self.service_id}] Manual override expired for '{agent_id}' - automatic rules now resume")
-            
+            control_mode = self.get_control_mode()
+            if control_mode != "automated":
+                logger.info(
+                    f"[{self.service_id}] Skipping rule-driven action for '{agent_id}' "
+                    f"because control_mode='{control_mode}'"
+                )
+                return
+
+            topology_error = self._validate_control_topology()
+            if topology_error:
+                logger.warning(
+                    f"[{self.service_id}] Skipping rule-driven action for '{agent_id}' due to invalid topology: "
+                    f"{topology_error}"
+                )
+                return
+
             logger.info(f"[{self.service_id}] 🔍 DEBUG: Processing rules for agent '{agent_id}' (state updated)")
             logger.info(f"[{self.service_id}] 🔍 DEBUG: Current state for '{agent_id}': {json.dumps(current_state, indent=2)}")
-            logger.info(f"[{self.service_id}] 🔍 DEBUG: Manual override active: {manual_override_active} ({remaining_time:.1f}s remaining)")
-            
+
             # Evaluate rules to get the raw decision
             raw_rule_decision = self.evaluate_rules(agent_id, current_state)
-            
+
             if raw_rule_decision is None:
                 logger.debug(f"[{self.service_id}] No rules triggered for agent '{agent_id}'")
                 return
-            
+
             # Extract power decision from rules
             raw_power_decision = raw_rule_decision.get("power")
             current_power_state = current_state.get("power", "off")
-            
+
             logger.info(f"[{self.service_id}] 🔍 DEBUG: Raw rule decision for '{agent_id}': power={raw_power_decision}")
             logger.info(f"[{self.service_id}] 🔍 DEBUG: Current power state for '{agent_id}': {current_power_state}")
-            
+
             # Apply extended window logic to prevent rapid on/off switching
             final_power_decision = self._apply_extended_window_logic(agent_id, current_power_state, raw_power_decision)
-            
+
             logger.info(f"[{self.service_id}] 🔍 DEBUG: Final decision for '{agent_id}' after extended window logic: {current_power_state} → {final_power_decision}")
-            
+
             if final_power_decision != current_power_state:
                 logger.info(f"[{self.service_id}] 🚨 ACTION NEEDED for '{agent_id}': {current_power_state} → {final_power_decision}")
-                
-                # Block ALL rule commands during manual override to maintain manual control
-                if manual_override_active:
-                    logger.info(f"[{self.service_id}] ✅ BLOCKED: ALL rule commands for '{agent_id}' - manual override active (maintaining manual state for {remaining_time:.1f}s)")
-                    return
-                
-                # Send action command based on final decision (only when manual override is not active)
                 if final_power_decision == "on":
                     self._send_action_command(agent_id, "turn_on")
                 elif final_power_decision == "off":
                     self._send_action_command(agent_id, "turn_off")
             else:
                 logger.debug(f"[{self.service_id}] ✅ NO ACTION: No state change needed for agent '{agent_id}' (already {current_power_state})")
-                
+
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
 
@@ -1074,6 +1193,21 @@ class ContextRuleManager:
         # Send mode change commands
         for agent_id, mode in mode_commands.items():
             try:
+                if self.get_control_mode() != "automated":
+                    logger.info(
+                        f"[{self.service_id}] Skipping auto mode change for '{agent_id}' "
+                        f"because control_mode='{self.get_control_mode()}'"
+                    )
+                    continue
+
+                topology_error = self._validate_control_topology()
+                if topology_error:
+                    logger.warning(
+                        f"[{self.service_id}] Skipping auto mode change for '{agent_id}' due to invalid topology: "
+                        f"{topology_error}"
+                    )
+                    continue
+
                 # Check if agent exists (has sent context updates)
                 if agent_id not in self.known_agents:
                     logger.info(f"[{self.service_id}] Agent '{agent_id}' not yet connected - adding to pending mode detection list (mode: {mode})")
@@ -1194,11 +1328,28 @@ class ContextRuleManager:
             rule_files = event.payload.get('rule_files', [])  # list of rule file paths
             preset_name = event.payload.get('preset_name')  # preset name for easier management
             command_id = event.event.id
+            source_entity_id = event.source.entityId if event.source else ""
+            demo_notice = ""
+            demo_ui_source = source_entity_id == "sensor-3d-ui"
+
+            # Demo policy: replace-only semantics. map load -> switch for UI callers.
+            if demo_ui_source and command_action == "load":
+                command_action = "switch"
+                demo_notice = "Demo policy: mapped load to switch (replace-only). "
             
             # If preset_name is provided, use preset files
             if preset_name and preset_name in self.rule_presets:
                 rule_files = self.rule_presets[preset_name]
                 logger.info(f"[{self.service_id}] Using preset '{preset_name}': {rule_files}")
+
+            # Demo UI path applies one rule at a time.
+            if demo_ui_source and isinstance(rule_files, list) and len(rule_files) > 1:
+                logger.info(
+                    f"[{self.service_id}] Demo source provided {len(rule_files)} rules; "
+                    f"keeping first file only for replace-only flow."
+                )
+                rule_files = [rule_files[0]]
+                demo_notice += "Only one rule file is allowed per demo apply; using first selection. "
             
             success = False
             message = ""
@@ -1335,6 +1486,9 @@ class ContextRuleManager:
                 
             else:
                 message = f"Unknown rules command action: {command_action}"
+
+            if demo_notice:
+                message = f"{demo_notice}{message}"
             
             # Publish result back
             self._publish_rules_command_result(command_id, success, message, command_action)
@@ -1417,6 +1571,27 @@ class ContextRuleManager:
                     "command_id": None,
                     "message": f"Agent {agent_id} not found or not connected",
                     "agent_id": agent_id
+                }
+
+            topology_error = self._validate_control_topology()
+            if topology_error:
+                return {
+                    "success": False,
+                    "command_id": None,
+                    "message": topology_error,
+                    "agent_id": agent_id,
+                }
+
+            current_mode = self.get_control_mode()
+            if action_name in {"turn_on", "turn_off"} and current_mode != "manual":
+                return {
+                    "success": False,
+                    "command_id": None,
+                    "message": (
+                        f"Manual command '{action_name}' rejected: control_mode is "
+                        f"'{current_mode}'. Switch to manual mode first."
+                    ),
+                    "agent_id": agent_id,
                 }
             
             # Create and send action command with specified priority
