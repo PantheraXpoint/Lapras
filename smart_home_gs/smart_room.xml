@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Smart Room XML Schema for LAPRAS++ 3D Sensor Visualization
+  
+  Coordinate system:
+    - Units: meters
+    - Origin: top-left corner of the room when viewed from above (BEV)
+    - x: left → right
+    - z: top → bottom (depth into the room)
+    - y: floor → ceiling (height)
+  
+  This file describes the N1 Lab room used in the LAPRAS smart space system.
+  Swap this file to change the entire 3D visualization.
+-->
+<smart-room version="1.0" name="N1 Lab Room" description="KAIST N1 Smart Space Lab">
+
+  <!-- Room envelope -->
+  <room width="5.0" depth="6.0" wallHeight="2.8" wallThickness="0.12" />
+
+  <!-- Walls: defined by which side of the room they are on.
+       Openings (doors, windows) cut into the wall automatically. -->
+  <walls>
+    <!-- Back wall (z=0, runs along x-axis) — no openings -->
+    <wall id="wall-back" side="back" />
+
+    <!-- Left wall (x=0, runs along z-axis) — has a window -->
+    <wall id="wall-left" side="left">
+      <window id="win-1" centerZ="2.7" width="0.96" sillHeight="0.75" topHeight="2.05"
+              glassColor="#a8d4f0" glassOpacity="0.55" />
+    </wall>
+
+    <!-- Right wall (x=roomWidth, runs along z-axis) — no openings -->
+    <wall id="wall-right" side="right" />
+
+    <!-- Front wall (z=roomDepth, runs along x-axis) — has a door -->
+    <wall id="wall-front" side="front">
+      <door id="door-1" centerX="4.5" width="0.85" height="2.0"
+            sensorKey="door_status" openAngle="90" />
+    </wall>
+  </walls>
+
+  <!-- Furniture items -->
+  <furniture>
+    <!-- TV mounted on back wall -->
+    <item id="tv-1" type="tv" label="TV"
+          x="2.5" y="1.35" z="0.18"
+          width="1.85" height="1.05" depth="0.07"
+          color="#2d3748" />
+
+    <!-- Air conditioning units near ceiling -->
+    <item id="ac-1" type="ac" label="AC 1"
+          x="2.5" y="2.62" z="1.68"
+          width="0.75" height="0.22" depth="0.55"
+          color="#14b8a6" />
+    <item id="ac-2" type="ac" label="AC 2"
+          x="2.5" y="2.62" z="3.48"
+          width="0.75" height="0.22" depth="0.55"
+          color="#14b8a6" />
+
+    <!-- Meeting table in center -->
+    <item id="table-1" type="table" label="Meeting Table"
+          x="2.4" y="0.74" z="2.7"
+          width="1.5" height="0.08" depth="3.0"
+          color="#8b6b4a" legColor="#374151" />
+
+    <!-- Chairs: activityKey binds to flattened sensor data for occupancy -->
+    <item id="chair-1"  type="chair" label="Chair 1"  bevX="25" bevY="25" activityKey="activity_s1a" />
+    <item id="chair-2"  type="chair" label="Chair 2"  bevX="25" bevY="35" activityKey="activity_s2a" />
+    <item id="chair-3"  type="chair" label="Chair 3"  bevX="25" bevY="45" activityKey="activity_s3a" />
+    <item id="chair-4"  type="chair" label="Chair 4"  bevX="25" bevY="55" activityKey="activity_s4a" />
+    <item id="chair-5"  type="chair" label="Chair 5"  bevX="25" bevY="65" activityKey="activity_s5a" />
+    <item id="chair-6"  type="chair" label="Chair 6"  bevX="70" bevY="18" activityKey="activity_s6a" />
+    <item id="chair-7"  type="chair" label="Chair 7"  bevX="70" bevY="28" activityKey="activity_s7a" />
+    <item id="chair-8"  type="chair" label="Chair 8"  bevX="70" bevY="38" activityKey="activity_s8a" />
+    <item id="chair-9"  type="chair" label="Chair 9"  bevX="70" bevY="48" activityKey="activity_s9a" />
+    <item id="chair-10" type="chair" label="Chair 10" bevX="70" bevY="58" activityKey="activity_s10a" />
+    <item id="chair-11" type="chair" label="Chair 11" bevX="70" bevY="68" activityKey="activity_s11a" />
+    <item id="chair-12" type="chair" label="Chair 12" bevX="50" bevY="80" activityKey="activity_s12a" />
+  </furniture>
+
+  <!-- Sensor placements
+       kind: dist | ir | light | temp | mot
+       position: x, y, z in meters
+       color: hex color for the sensor marker
+
+       Generic binding abstraction (for minimal code changes across spaces):
+       - bindingType:
+           binary       -> active if sourceKey > 0 (or matches activeValues)
+           threshold_lt -> active if sourceKey < thresholdSourceKey / thresholdValue
+           threshold_gt -> active if sourceKey > thresholdSourceKey / thresholdValue
+           range        -> active if minValue <= sourceKey <= maxValue
+           outside_range-> active if sourceKey < minValue or sourceKey > maxValue
+           enum         -> active if sourceKey matches activeValues (comma-separated)
+       - sourceKey: flattened key from /api/latest
+       - thresholdSourceKey / thresholdValue: comparator for threshold bindings
+       - minValue / maxValue: comparator for range bindings
+       - activeValues: CSV list for enum/binary string matching
+       - missingPolicy: unknown | inactive | hide
+
+       Legacy compatibility fields are still accepted:
+       - attrKey (fallback sourceKey)
+       - thresholdKey (fallback thresholdSourceKey)
+  -->
+  <sensors>
+    <!-- Distance sensors (left wall) -->
+    <sensor id="dist-1" kind="dist" label="Dist 1"
+            bindingType="threshold_lt" sourceKey="distance_1_cm" thresholdSourceKey="distance_1_threshold_cm"
+            attrKey="distance_1_cm" thresholdKey="distance_1_threshold_cm" missingPolicy="unknown"
+            x="0.18" y="1.85" z="1.50" color="#ef4444" />
+    <sensor id="dist-2" kind="dist" label="Dist 2"
+            bindingType="threshold_lt" sourceKey="distance_2_cm" thresholdSourceKey="distance_2_threshold_cm"
+            attrKey="distance_2_cm" thresholdKey="distance_2_threshold_cm" missingPolicy="unknown"
+            x="0.18" y="1.25" z="2.10" color="#ef4444" />
+    <sensor id="dist-3" kind="dist" label="Dist 3"
+            bindingType="threshold_lt" sourceKey="distance_3_cm" thresholdSourceKey="distance_3_threshold_cm"
+            attrKey="distance_3_cm" thresholdKey="distance_3_threshold_cm" missingPolicy="unknown"
+            x="0.18" y="1.85" z="3.30" color="#ef4444" />
+    <sensor id="dist-4" kind="dist" label="Dist 4"
+            bindingType="threshold_lt" sourceKey="distance_4_cm" thresholdSourceKey="distance_4_threshold_cm"
+            attrKey="distance_4_cm" thresholdKey="distance_4_threshold_cm" missingPolicy="unknown"
+            x="0.18" y="1.60" z="3.90" color="#ef4444" />
+
+    <!-- Light sensor (left wall, near window) -->
+    <sensor id="light-1" kind="light" label="Light"
+            bindingType="threshold_gt" sourceKey="light_1" thresholdSourceKey="light_1_indoor_threshold"
+            attrKey="light_1" missingPolicy="unknown"
+            x="0.18" y="2.15" z="2.70" color="#facc15" />
+
+    <!-- Temperature sensor (back wall, right side) -->
+    <sensor id="temp-1" kind="temp" label="Temp"
+            bindingType="outside_range" sourceKey="temperature_1" minValue="22" maxValue="28"
+            attrKey="temperature_1" missingPolicy="unknown"
+            x="4.0" y="2.25" z="0.23" color="#dc2626" />
+
+    <!-- Infrared sensors (right wall) -->
+    <sensor id="ir-1" kind="ir" label="Ir 1"
+            bindingType="threshold_lt" sourceKey="infrared_1_cm" thresholdSourceKey="infrared_1_threshold_cm"
+            attrKey="infrared_1_cm" thresholdKey="infrared_1_threshold_cm" missingPolicy="unknown"
+            x="4.82" y="1.85" z="1.68" color="#e11d48" />
+    <sensor id="ir-2" kind="ir" label="Ir 2"
+            bindingType="threshold_lt" sourceKey="infrared_2_cm" thresholdSourceKey="infrared_2_threshold_cm"
+            attrKey="infrared_2_cm" thresholdKey="infrared_2_threshold_cm" missingPolicy="unknown"
+            x="4.82" y="1.45" z="2.28" color="#f472b6" />
+    <sensor id="ir-3" kind="ir" label="Ir 3"
+            bindingType="threshold_lt" sourceKey="infrared_3_cm" thresholdSourceKey="infrared_3_threshold_cm"
+            attrKey="infrared_3_cm" thresholdKey="infrared_3_threshold_cm" missingPolicy="unknown"
+            x="4.82" y="1.85" z="3.48" color="#f472b6" />
+    <sensor id="ir-4" kind="ir" label="Ir 4"
+            bindingType="threshold_lt" sourceKey="infrared_4_cm" thresholdSourceKey="infrared_4_threshold_cm"
+            attrKey="infrared_4_cm" thresholdKey="infrared_4_threshold_cm" missingPolicy="unknown"
+            x="4.82" y="1.60" z="4.08" color="#f472b6" />
+
+    <!-- Motion sensors (ceiling-mounted PIR) — all share motion_status -->
+    <sensor id="mot-1"  kind="mot" label="Mot 1"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="4.82" y="2.74" z="0.42" color="#eab308" />
+    <sensor id="mot-2"  kind="mot" label="Mot 2"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="0.18" y="2.74" z="1.50" color="#eab308" />
+    <sensor id="mot-3"  kind="mot" label="Mot 3"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="0.18" y="2.74" z="2.70" color="#eab308" />
+    <sensor id="mot-4"  kind="mot" label="Mot 4"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="0.18" y="2.74" z="3.90" color="#eab308" />
+    <sensor id="mot-5"  kind="mot" label="Mot 5"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="3.90" y="2.74" z="1.68" color="#eab308" />
+    <sensor id="mot-6"  kind="mot" label="Mot 6"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="3.90" y="2.74" z="2.88" color="#eab308" />
+    <sensor id="mot-7"  kind="mot" label="Mot 7"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="3.90" y="2.74" z="4.08" color="#eab308" />
+    <sensor id="mot-8"  kind="mot" label="Mot 8"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="0.18" y="2.74" z="5.70" color="#eab308" />
+    <sensor id="mot-9"  kind="mot" label="Mot 9"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="1.25" y="2.74" z="5.82" color="#eab308" />
+    <sensor id="mot-10" kind="mot" label="Mot 10" bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"
+            x="3.25" y="2.74" z="5.82" color="#eab308" />
+  </sensors>
+
+  <!-- Stream configuration -->
+  <stream endpoint="/api/latest" pollIntervalMs="1000" />
+
+  <!-- Sample payload for offline/demo mode (same structure as your MQTT stream) -->
+  <samplePayload><![CDATA[
+    {
+      "state": {
+        "power": "off",
+        "proximity_status": "far",
+        "motion_status": "no_motion",
+        "activity_status": "idle",
+        "activity_detected": "false",
+        "light_status": "dim",
+        "temperature_status": "normal",
+        "door_status": "closed",
+        "preset_mode": "off",
+        "light_power": 0,
+        "aircon_power": "off"
+      },
+      "sensors": {
+        "light_1": { "value": 109.52, "unit": "lux", "metadata": { "light_status": "indoor_light", "sunlight_threshold": 1000.0, "indoor_threshold": 10.0 } },
+        "temperature_1": { "value": 24.4, "unit": "C", "metadata": { "temperature_status": "normal", "hot_threshold": 28.0, "cold_threshold": 22.0 } },
+        "infrared_1": { "value": 150, "unit": "cm", "metadata": { "threshold_cm": 149 } },
+        "infrared_2": { "value": 150, "unit": "cm", "metadata": { "threshold_cm": 149 } },
+        "infrared_3": { "value": 150, "unit": "cm", "metadata": { "threshold_cm": 149 } },
+        "infrared_4": { "value": 150, "unit": "cm", "metadata": { "threshold_cm": 149 } },
+        "distance_1": { "value": 130, "unit": "cm", "metadata": { "threshold_cm": 129, "distance_cm": 130 } },
+        "distance_2": { "value": 130, "unit": "cm", "metadata": { "threshold_cm": 129, "distance_cm": 130 } },
+        "distance_3": { "value": 130, "unit": "cm", "metadata": { "threshold_cm": 129, "distance_cm": 130 } },
+        "distance_4": { "value": 130, "unit": "cm", "metadata": { "threshold_cm": 129, "distance_cm": 130 } }
+      }
+    }
+  ]]></samplePayload>
+
+</smart-room>

@@ -1,0 +1,2078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAPRAS++ Smart Room — Living Room Layout</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://esm.sh/three@0.170.0",
+        "three/addons/": "https://esm.sh/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    window.THREE = THREE;
+    window.OrbitControls = OrbitControls;
+    // Signal that Three.js is ready
+    window._threeReady = true;
+    document.dispatchEvent(new Event('three-ready'));
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
+    #app-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(460px, 32vw);
+      height: 100vh;
+      width: 100vw;
+      background: #e8f0fa;
+    }
+    #left-pane {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid rgba(15,23,42,0.1);
+    }
+    #right-pane {
+      padding: 12px;
+      background: #f8fafc;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #e8f0fa; color: #334155; font-size: 16px; z-index: 100;
+    }
+    #side-panel {
+      width: 100%; max-height: none; overflow: auto;
+      background: rgba(255,255,255,0.96); color: #0f172a; padding: 14px 16px; border-radius: 10px;
+      border: 1px solid rgba(15,23,42,0.12); box-shadow: 0 8px 24px rgba(15,23,42,0.08); z-index: 11;
+      display: block;
+    }
+    #side-panel h2 { margin: 0; font-size: 15px; color: #0f172a; }
+    #panel-subtitle { margin: 4px 0 10px; font-size: 12px; color: #475569; }
+    #panel-metrics { margin: 0 0 8px; font-size: 11px; color: #64748b; }
+    #panel-caption { margin: 0; font-size: 13px; line-height: 1.45; color: #1e293b; white-space: pre-wrap; }
+    #sensor-detail { display: none; }
+    #sensor-detail dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 12px; }
+    #sensor-detail dt { opacity: 0.65; }
+    #sensor-detail dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    #clear-selection {
+      margin-bottom: 10px; border: 1px solid rgba(15,23,42,0.15); background: #f8fafc; color: #0f172a;
+      border-radius: 6px; font-size: 12px; padding: 6px 9px; cursor: pointer;
+    }
+    #clear-selection:hover { background: #eef2f7; }
+    #hud {
+      position: static;
+      width: 100%;
+      max-width: none;
+      max-height: 32vh;
+      overflow: auto;
+      background: rgba(255,255,255,0.94); color: #1e293b; padding: 14px 16px;
+      border-radius: 10px; font-size: 12px; line-height: 1.45;
+      border: 1px solid rgba(15,23,42,0.12); box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+      margin-top: auto;
+    }
+    #hud h1 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #0f172a; }
+    #hud p { margin: 0 0 6px; opacity: 0.8; font-size: 11px; }
+    #binding-status { color: #7f1d1d; opacity: 1; }
+    #hud dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+    #hud dt { opacity: 0.55; }
+    #hud dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+    #legend {
+      position: absolute; bottom: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px;
+      pointer-events: none; justify-content: flex-start; z-index: 10;
+    }
+    #legend span {
+      background: rgba(255,255,255,0.92); color: #334155; padding: 4px 10px;
+      border-radius: 6px; font-size: 11px; border: 1px solid rgba(15,23,42,0.1);
+      box-shadow: 0 2px 8px rgba(15,23,42,0.06);
+    }
+    #legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .panel-block {
+      width: 100%;
+      background: rgba(255,255,255,0.96);
+      color: #0f172a;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(15,23,42,0.12);
+      box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+    }
+    .panel-block h3 { margin: 0 0 6px; font-size: 14px; color: #0f172a; }
+    .panel-note { margin: 0 0 10px; font-size: 11px; color: #64748b; }
+    #chat-messages {
+      min-height: 130px;
+      max-height: 190px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-right: 4px;
+      margin-bottom: 10px;
+    }
+    .chat-msg {
+      font-size: 12px;
+      line-height: 1.35;
+      padding: 8px 10px;
+      border-radius: 8px;
+      max-width: 92%;
+      white-space: pre-wrap;
+    }
+    .chat-msg-user {
+      align-self: flex-end;
+      background: #dbeafe;
+      border: 1px solid #bfdbfe;
+      color: #1e3a8a;
+    }
+    .chat-msg-assistant {
+      align-self: flex-start;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #334155;
+    }
+    #chat-input-row { display: flex; gap: 8px; }
+    #chat-input {
+      flex: 1;
+      border: 1px solid rgba(15,23,42,0.15);
+      border-radius: 7px;
+      font-size: 12px;
+      padding: 8px 10px;
+      outline: none;
+      color: #0f172a;
+      background: #fff;
+    }
+    #chat-send {
+      border: 1px solid rgba(15,23,42,0.18);
+      border-radius: 7px;
+      padding: 8px 12px;
+      font-size: 12px;
+      background: #0ea5e9;
+      color: #fff;
+      cursor: pointer;
+    }
+    #chat-send:hover { background: #0284c7; }
+    .control-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .control-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .control-row > span {
+      min-width: 108px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #334155;
+    }
+    .control-btn {
+      border: 1px solid rgba(15,23,42,0.18);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 12px;
+      color: #334155;
+      background: #f8fafc;
+      cursor: pointer;
+    }
+    .control-btn:disabled {
+      border-style: dashed;
+      color: #94a3b8;
+      cursor: not-allowed;
+      opacity: 0.75;
+    }
+    .control-btn:not(:disabled):hover {
+      background: #e0f2fe;
+      border-color: #0284c7;
+    }
+    #control-last-result {
+      font-size: 11px;
+      color: #475569;
+      margin: 4px 0 0;
+      min-height: 2.5em;
+    }
+    #panel-tabs {
+      display: flex;
+      gap: 8px;
+    }
+    .panel-tab-btn {
+      border: 1px solid rgba(15,23,42,0.14);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 12px;
+      color: #334155;
+      background: #f8fafc;
+      cursor: pointer;
+    }
+    .panel-tab-btn.active {
+      background: #0ea5e9;
+      border-color: #0284c7;
+      color: #fff;
+    }
+    .panel-page { display: none; }
+    .panel-page.active {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .control-subtabs { display: flex; gap: 8px; margin-bottom: 8px; }
+    .control-subtab-btn {
+      border: 1px solid rgba(15,23,42,0.14);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      background: #f8fafc;
+      color: #334155;
+    }
+    .control-subtab-btn.active { background: #0ea5e9; border-color: #0284c7; color: #fff; }
+    .control-subpage { display: none; }
+    .control-subpage.active { display: block; }
+    .agent-btn { text-align: left; }
+    .agent-btn.active { background: #0ea5e9; color: #fff; border-color: #0284c7; }
+    .support-status { font-size: 11px; margin: 4px 0 0; color: #475569; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading smart room XML...</div>
+  <div id="app-shell">
+    <section id="left-pane">
+      <div id="legend" style="display:none"></div>
+      <div id="scene-container" style="width:100%; height:100%;"></div>
+    </section>
+    <aside id="right-pane">
+      <div id="panel-tabs">
+        <button id="tab-insights" class="panel-tab-btn active" type="button">Insights</button>
+        <button id="tab-control" class="panel-tab-btn" type="button">Control</button>
+        <button id="tab-sensor-config" class="panel-tab-btn" type="button">Sensor Config</button>
+      </div>
+      <section id="panel-page-insights" class="panel-page active">
+        <aside id="side-panel">
+          <h2 id="panel-title">LLM Caption</h2>
+          <p id="panel-subtitle">Latest 30-second summary</p>
+          <p id="panel-metrics">Rendered sensors: 0 / 0</p>
+          <p id="panel-caption">Waiting for caption...</p>
+          <div id="sensor-detail">
+            <button id="clear-selection" type="button">← Back to caption</button>
+            <dl id="sensor-fields"></dl>
+          </div>
+        </aside>
+        <section id="chat-panel" class="panel-block">
+          <h3>Chat</h3>
+          <p class="panel-note">Room assistant chat UI.</p>
+          <div id="chat-messages">
+            <div class="chat-msg chat-msg-assistant">Chat is ready. Backend integration for room-aware chat can be connected next.</div>
+          </div>
+          <div id="chat-input-row">
+            <input id="chat-input" type="text" placeholder="Type a message..." />
+            <button id="chat-send" type="button">Send</button>
+          </div>
+        </section>
+        <div id="hud" style="display:none">
+          <h1 id="room-title">Smart Room</h1>
+          <p id="room-desc"></p>
+          <p id="stream-status">Stream: loading...</p>
+          <p id="binding-status">Bindings: loading...</p>
+          <dl id="attrs"></dl>
+        </div>
+      </section>
+      <section id="panel-page-control" class="panel-page">
+        <section id="control-panel" class="panel-block">
+          <h3>Control</h3>
+          <p id="control-cap-line" class="panel-note">Agents seen on stream: …</p>
+          <p id="control-mqtt-line" class="panel-note" style="display:none"></p>
+          <p id="control-mode-line" class="panel-note">Control mode: unknown</p>
+          <p id="control-agent-mode-line" class="panel-note">Selected agent mode: unknown</p>
+          <div class="control-subtabs">
+            <button id="control-subtab-manual" class="control-subtab-btn active" type="button">Manual Control</button>
+            <button id="control-subtab-auto" class="control-subtab-btn" type="button">Automated Control</button>
+          </div>
+          <div id="control-subpage-manual" class="control-subpage active">
+          <h4 style="margin:2px 0 4px;font-size:12px;color:#0f172a">Manual On/Off</h4>
+          <div class="control-rows">
+            <div class="control-row">
+              <span>Light</span>
+              <button id="ctl-light-on" class="control-btn" type="button" disabled data-row="light">On</button>
+              <button id="ctl-light-off" class="control-btn" type="button" disabled data-row="light">Off</button>
+            </div>
+            <div class="control-row">
+              <span>AC</span>
+              <button id="ctl-ac-on" class="control-btn" type="button" disabled data-row="ac">On</button>
+              <button id="ctl-ac-off" class="control-btn" type="button" disabled data-row="ac">Off</button>
+            </div>
+            <!-- Removed: combined Light + AC manual control row -->
+          </div>
+          </div>
+          <div id="control-subpage-auto" class="control-subpage">
+          <h4 style="margin:10px 0 4px;font-size:12px;color:#0f172a">Automation Rules</h4>
+          <p class="panel-note" style="margin:0 0 6px;">Select one running agent to configure details below.</p>
+          <div id="auto-agent-list" class="control-rows"></div>
+          <p id="auto-agent-selected" class="panel-note">Selected agent: none</p>
+          <p id="auto-support-preset" class="support-status">Preset: unsupported</p>
+          <p id="auto-support-rules" class="support-status">Rules: unsupported</p>
+          <p id="auto-support-threshold" class="support-status">Threshold: unsupported</p>
+          <div id="auto-rules-controls" class="control-row" style="margin-top:4px;">
+            <span>Rule</span>
+            <select id="auto-rule-select" class="control-btn"></select>
+            <button id="auto-rule-add-btn" class="control-btn" type="button">Add</button>
+          </div>
+          <div id="auto-rule-picked-list" class="control-rows" style="margin-top:4px;"></div>
+          <div id="auto-rules-apply-row" class="control-row" style="margin-top:4px;">
+            <span>Apply mode</span>
+            <select id="auto-rule-action" class="control-btn">
+              <option value="switch">Switch (replace current)</option>
+            </select>
+            <button id="auto-apply-btn" class="control-btn" type="button">Apply</button>
+          </div>
+          <h4 id="clubhouse-mode-title" style="margin:10px 0 4px;font-size:12px;color:#0f172a">Clubhouse Mode (Current Position)</h4>
+          <p id="clubhouse-mode-note" class="panel-note" style="margin:0 0 6px;">Position (all/back/front) comes from the running clubhouse agent. This control changes mode only.</p>
+          <div id="clubhouse-mode-agent-row" class="control-row">
+            <span>Agent</span>
+            <select id="preset-agent" class="control-btn"></select>
+          </div>
+          <div id="clubhouse-mode-value-row" class="control-row">
+            <span>Mode</span>
+            <select id="preset-mode" class="control-btn">
+              <option value="normal">normal</option>
+              <option value="read">read</option>
+              <option value="nap">nap</option>
+              <option value="clean">clean</option>
+            </select>
+            <button id="preset-apply-btn" class="control-btn" type="button">Apply Mode</button>
+          </div>
+          <h4 style="margin:10px 0 4px;font-size:12px;color:#0f172a">Threshold</h4>
+          <p class="panel-note" style="margin:0 0 6px;">Agent support differs: aircon/hue_light are fully supported; clubhouse IDs depend on agent-side threshold handling.</p>
+          <div class="control-row">
+            <span>Agent</span>
+            <select id="threshold-agent" class="control-btn"></select>
+          </div>
+          <div class="control-row">
+            <span>Type</span>
+            <select id="threshold-type" class="control-btn"></select>
+            <input id="threshold-value" class="control-btn" type="number" step="0.1" placeholder="threshold"/>
+            <button id="threshold-apply-btn" class="control-btn" type="button">Apply Threshold</button>
+          </div>
+          </div>
+          <p id="control-last-result"></p>
+        </section>
+      </section>
+      <section id="panel-page-sensor-config" class="panel-page">
+        <section id="sensor-config-panel" class="panel-block">
+          <h3>Sensor Config</h3>
+          <p class="panel-note">Guided sensor-to-agent binding config.</p>
+          <div class="control-row"><span>Target Agent</span><select id="sensorcfg-target-agent" class="control-btn"></select></div>
+          <div class="control-row"><span>Action</span>
+            <select id="sensorcfg-action" class="control-btn">
+              <option value="add">add</option>
+              <option value="remove">remove</option>
+            </select>
+          </div>
+          <p id="sensorcfg-list-label" class="panel-note" style="margin:0 0 6px;"></p>
+          <div id="sensorcfg-id-list" class="control-rows"></div>
+          <div class="control-row"><button id="sensorcfg-apply-btn" class="control-btn" type="button">Apply Sensor Config</button></div>
+          <p id="sensorcfg-result" class="support-status"></p>
+        </section>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    // =========================================================================
+    // Shared state
+    // =========================================================================
+    let totalXmlSensors = 0;
+    const latestEvalById = new Map();
+
+    // ── Utilities ────────────────────────────────────────────────────────────
+    function strToNum(value) {
+      if (value === 'on' || value === 'true' || value === true) return 1;
+      if (value === 'off' || value === 'false' || value === false) return 0;
+      if (['near','motion','active','open','bright','warm'].includes(String(value))) return 1;
+      if (['far','no_motion','idle','closed','dim','normal','unknown'].includes(String(value))) return 0;
+      const n = parseFloat(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function flattenNestedState(attrs, prefix, value) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [k, v] of Object.entries(value)) flattenNestedState(attrs, prefix ? `${prefix}_${k}` : k, v);
+        return;
+      }
+      attrs[prefix] = strToNum(value);
+    }
+
+    function flattenPayload(payload) {
+      const state = payload.state || {};
+      const sensors = payload.sensors || {};
+      const attrs = {};
+      for (const [k, v] of Object.entries(state)) {
+        if (v && typeof v === 'object' && !Array.isArray(v)) flattenNestedState(attrs, k, v);
+        else attrs[k] = strToNum(v);
+      }
+      for (const [name, info] of Object.entries(sensors)) {
+        const safeName = name.replace(/-/g, '_');
+        const unit = info.unit || '';
+        if (unit === 'cm') {
+          attrs[`${safeName}_cm`] = parseFloat(info.value);
+        } else {
+          const f = parseFloat(info.value);
+          if (Number.isFinite(f)) attrs[safeName] = f;
+        }
+        const meta = info.metadata || {};
+        if (meta.threshold_cm != null) attrs[`${safeName}_threshold_cm`] = parseFloat(meta.threshold_cm);
+        if (meta.distance_cm != null) attrs[`${safeName}_distance_cm`] = parseFloat(meta.distance_cm);
+        for (const [mk, mv] of Object.entries(meta)) {
+          if (typeof mv === 'object') continue;
+          const key = `${safeName}_${mk}`.replace(/-/g, '_');
+          if (!(key in attrs)) attrs[key] = strToNum(mv);
+        }
+      }
+      // Compatibility aliases
+      if (!('motion_status' in attrs) && ('activity_summary_motion_active' in attrs)) attrs.motion_status = attrs.activity_summary_motion_active;
+      if (!('activity_detected' in attrs) && ('activity_summary_activity_detected' in attrs)) attrs.activity_detected = attrs.activity_summary_activity_detected;
+      if (!('door_status' in attrs)) {
+        if ('door_01_door_status' in attrs) attrs.door_status = attrs.door_01_door_status;
+        else if ('activity_summary_doors_open' in attrs) attrs.door_status = Number(attrs.activity_summary_doors_open) > 0 ? 1 : 0;
+      }
+      return attrs;
+    }
+
+    // ── XML Loader ────────────────────────────────────────────────────────────
+    async function loadRoomXML(url) {
+      const resp = await fetch(url);
+      const text = await resp.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'application/xml');
+      const root = doc.querySelector('smart-room');
+
+      const roomEl = root.querySelector('room');
+      const room = {
+        name:          root.getAttribute('name') || 'Smart Room',
+        description:   root.getAttribute('description') || '',
+        width:         parseFloat(roomEl.getAttribute('width')),
+        depth:         parseFloat(roomEl.getAttribute('depth')),
+        wallHeight:    parseFloat(roomEl.getAttribute('wallHeight')),
+        wallThickness: parseFloat(roomEl.getAttribute('wallThickness') || '0.15'),
+      };
+
+      const walls = [];
+      for (const w of root.querySelectorAll('walls > wall')) {
+        const wall = { id: w.getAttribute('id'), side: w.getAttribute('side'), openings: [] };
+        for (const win of w.querySelectorAll('window')) {
+          wall.openings.push({
+            type: 'window',
+            id: win.getAttribute('id'),
+            centerZ: parseFloat(win.getAttribute('centerZ') || '0'),
+            centerX: parseFloat(win.getAttribute('centerX') || '0'),
+            width: parseFloat(win.getAttribute('width')),
+            sillHeight: parseFloat(win.getAttribute('sillHeight')),
+            topHeight: parseFloat(win.getAttribute('topHeight')),
+            glassColor: win.getAttribute('glassColor') || '#a8d4f0',
+            glassOpacity: parseFloat(win.getAttribute('glassOpacity') || '0.5'),
+          });
+        }
+        for (const d of w.querySelectorAll('door')) {
+          wall.openings.push({
+            type: 'door', id: d.getAttribute('id'),
+            centerX: parseFloat(d.getAttribute('centerX') || '0'),
+            centerZ: parseFloat(d.getAttribute('centerZ') || '0'),
+            width: parseFloat(d.getAttribute('width')),
+            height: parseFloat(d.getAttribute('height') || '2.1'),
+            sensorKey: d.getAttribute('sensorKey') || '',
+            openAngle: parseFloat(d.getAttribute('openAngle') || '90'),
+            alignOffsetX: parseFloat(d.getAttribute('alignOffsetX') || '0') || 0,
+            panelSnapX: parseFloat(d.getAttribute('panelSnapX') || '0.02') || 0.02,
+            panelWidthMargin: parseFloat(d.getAttribute('panelWidthMargin') || '0.04') || 0,
+            panelOffsetX: parseFloat(d.getAttribute('panelOffsetX') || '0') || 0,
+            panelOffsetY: parseFloat(d.getAttribute('panelOffsetY') || '0') || 0,
+            panelOffsetZ: parseFloat(d.getAttribute('panelOffsetZ') || '0') || 0,
+            // Meters along world Z on the right wall: shrink gap from low-Z / high-Z edges (not Y).
+            openingTrimDown: Math.max(0, parseFloat(d.getAttribute('openingTrimDown') || '0') || 0),
+            openingTrimUp: Math.max(0, parseFloat(d.getAttribute('openingTrimUp') || '0') || 0),
+          });
+        }
+        walls.push(wall);
+      }
+
+      const furniture = [];
+      for (const f of root.querySelectorAll('furniture > item')) {
+        const item = { id: f.getAttribute('id'), type: f.getAttribute('type'), label: f.getAttribute('label') || '' };
+        if (f.hasAttribute('x'))    { item.x = parseFloat(f.getAttribute('x')); item.y = parseFloat(f.getAttribute('y')); item.z = parseFloat(f.getAttribute('z')); }
+        if (f.hasAttribute('bevX')) { item.bevX = parseFloat(f.getAttribute('bevX')); item.bevY = parseFloat(f.getAttribute('bevY')); }
+        if (f.hasAttribute('width'))  item.width  = parseFloat(f.getAttribute('width'));
+        if (f.hasAttribute('height')) item.height = parseFloat(f.getAttribute('height'));
+        if (f.hasAttribute('depth'))  item.depth  = parseFloat(f.getAttribute('depth'));
+        if (f.hasAttribute('direction'))  item.direction  = parseFloat(f.getAttribute('direction'));
+        item.color     = f.getAttribute('color')     || '#888';
+        item.legColor  = f.getAttribute('legColor')  || '#374151';
+        item.activityKey = f.getAttribute('activityKey') || '';
+        furniture.push(item);
+      }
+
+      const sensors = [];
+      for (const s of root.querySelectorAll('sensors > sensor')) {
+        sensors.push({
+          id: s.getAttribute('id'), kind: s.getAttribute('kind'), label: s.getAttribute('label') || s.getAttribute('id'),
+          bindingType: s.getAttribute('bindingType') || '',
+          sourceKey: s.getAttribute('sourceKey') || '',
+          thresholdSourceKey: s.getAttribute('thresholdSourceKey') || '',
+          thresholdValue: s.hasAttribute('thresholdValue') ? parseFloat(s.getAttribute('thresholdValue')) : null,
+          minValue: s.hasAttribute('minValue') ? parseFloat(s.getAttribute('minValue')) : null,
+          maxValue: s.hasAttribute('maxValue') ? parseFloat(s.getAttribute('maxValue')) : null,
+          activeValues: s.getAttribute('activeValues') || '',
+          missingPolicy: s.getAttribute('missingPolicy') || 'unknown',
+          x: parseFloat(s.getAttribute('x')), y: parseFloat(s.getAttribute('y')), z: parseFloat(s.getAttribute('z')),
+          color: s.getAttribute('color') || '#ef4444',
+        });
+      }
+
+      const streamEl = root.querySelector('stream');
+      const stream = {
+        endpoint: streamEl ? streamEl.getAttribute('endpoint') : '/api/latest',
+        pollIntervalMs: parseInt(streamEl ? streamEl.getAttribute('pollIntervalMs') : '1000'),
+      };
+
+      let samplePayload = null;
+      const spEl = root.querySelector('samplePayload');
+      if (spEl) { try { samplePayload = JSON.parse(spEl.textContent); } catch(e) { console.warn('samplePayload parse failed', e); } }
+
+      return { room, walls, furniture, sensors, stream, samplePayload };
+    }
+
+    // ── BEV helper ────────────────────────────────────────────────────────────
+    function bevToXZ(bx, by, W, D) {
+      return { x: (bx / 100) * W, z: (by / 100) * D };
+    }
+
+    // ── Sensor evaluation ─────────────────────────────────────────────────────
+    function toFiniteNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+    function parseActiveValues(raw) { if (!raw) return []; return String(raw).split(',').map(v => v.trim()).filter(Boolean); }
+    function defaultBindingType(el) { if (el.dataset && (el.dataset.thresholdSourceKey || el.dataset.thresholdValue)) return 'threshold_lt'; return 'binary'; }
+
+    function evaluateBinding(el, attrs) {
+      const dataset = el.dataset || el;
+      const sourceKey = dataset.sourceKey;
+      const thresholdSourceKey = dataset.thresholdSourceKey;
+      const bindingType = (dataset.bindingType || defaultBindingType({ dataset })).toLowerCase();
+      const missingPolicy = (dataset.missingPolicy || 'unknown').toLowerCase();
+      const activeValues = parseActiveValues(dataset.activeValues);
+      const minValue = toFiniteNumber(dataset.minValue);
+      const maxValue = toFiniteNumber(dataset.maxValue);
+      const thresholdValue = toFiniteNumber(dataset.thresholdValue);
+
+      if (!sourceKey) return { active: false, status: 'invalid', visible: true, invalid: true, message: 'missing sourceKey' };
+
+      const sourceRaw = attrs[sourceKey];
+      if (sourceRaw === undefined || sourceRaw === null) {
+        return { active: false, status: missingPolicy === 'inactive' ? 'inactive' : 'unknown', visible: missingPolicy !== 'hide', missingKey: sourceKey, value: null };
+      }
+
+      const sourceNum = toFiniteNumber(sourceRaw);
+      const sourceStr = String(sourceRaw).toLowerCase();
+      let thresholdNum = thresholdValue;
+      if (thresholdNum === null && thresholdSourceKey) thresholdNum = toFiniteNumber(attrs[thresholdSourceKey]);
+
+      let active = false, invalid = false;
+
+      if (bindingType === 'binary') {
+        if (activeValues.length > 0) active = activeValues.map(v => v.toLowerCase()).includes(sourceStr);
+        else if (sourceNum !== null) active = sourceNum > 0;
+        else active = ['true','on','active','open','motion','near'].includes(sourceStr);
+      } else if (bindingType === 'enum') {
+        active = activeValues.map(v => v.toLowerCase()).includes(sourceStr);
+      } else if (bindingType === 'threshold_lt') {
+        if (sourceNum === null || thresholdNum === null) invalid = true;
+        else active = sourceNum < thresholdNum;
+      } else if (bindingType === 'threshold_gt') {
+        if (sourceNum === null || thresholdNum === null) invalid = true;
+        else active = sourceNum > thresholdNum;
+      } else if (bindingType === 'range') {
+        if (sourceNum === null || minValue === null || maxValue === null) invalid = true;
+        else active = sourceNum >= minValue && sourceNum <= maxValue;
+      } else if (bindingType === 'outside_range') {
+        if (sourceNum === null || minValue === null || maxValue === null) invalid = true;
+        else active = sourceNum < minValue || sourceNum > maxValue;
+      } else {
+        invalid = true;
+      }
+
+      return {
+        active: invalid ? false : active,
+        status: invalid ? 'invalid' : (active ? 'active' : 'inactive'),
+        visible: true, invalid,
+        value: sourceRaw, sourceKey, thresholdKey: thresholdSourceKey,
+        thresholdValue: thresholdNum, minValue, maxValue, bindingType,
+      };
+    }
+
+    function formatSensorLabel(spec, evalResult) {
+      const label = spec.label || spec.id || 'sensor';
+      if (evalResult.invalid) return `${label}: invalid`;
+      if (evalResult.value === null) return `${label}: missing`;
+      const valueNum = toFiniteNumber(evalResult.value);
+      const valueStr = valueNum !== null && !Number.isInteger(valueNum) ? valueNum.toFixed(1) : String(evalResult.value);
+      if (evalResult.bindingType === 'threshold_lt' || evalResult.bindingType === 'threshold_gt') {
+        const thr = evalResult.thresholdValue;
+        return `${label}: ${valueStr}${thr !== null ? ' / ' + thr : ''}`;
+      }
+      if (evalResult.bindingType === 'range' || evalResult.bindingType === 'outside_range') return `${label}: ${valueStr} / ${evalResult.minValue ?? '—'}-${evalResult.maxValue ?? '—'}`;
+      return `${label}: ${valueStr}`;
+    }
+
+    function renderBindingStatus(diagnostics) {
+      const el = document.getElementById('binding-status');
+      if (!el) return;
+      const missing = [...diagnostics.missingKeys].sort();
+      const invalidCount = diagnostics.invalidIds.length;
+      if (missing.length === 0 && invalidCount === 0) { el.textContent = `Bindings: OK (${diagnostics.totalSensors} sensors mapped)`; el.style.color = ''; return; }
+      el.textContent = `Bindings: missing=${missing.length}${missing.length ? ' [' + missing.slice(0, 3).join(', ') + (missing.length > 3 ? '…' : '') + ']' : ''}, invalid=${invalidCount}`;
+    }
+
+    // ── Panel helpers ─────────────────────────────────────────────────────────
+    function toDisplayValue(v) {
+      if (v === null || v === undefined || v === '') return '—';
+      if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3);
+      return String(v);
+    }
+
+    function setPanelFields(rows) {
+      const dl = document.getElementById('sensor-fields');
+      dl.innerHTML = '';
+      for (const [k, v] of rows) {
+        const dt = document.createElement('dt'); dt.textContent = k;
+        const dd = document.createElement('dd'); dd.textContent = toDisplayValue(v);
+        dl.appendChild(dt); dl.appendChild(dd);
+      }
+    }
+
+    function showSensorDetails(title, subtitle, rows) {
+      document.getElementById('panel-title').textContent = title;
+      document.getElementById('panel-subtitle').textContent = subtitle;
+      document.getElementById('panel-caption').style.display = 'none';
+      document.getElementById('sensor-detail').style.display = 'block';
+      setPanelFields(rows);
+    }
+
+    function extractCaptionText(data, activeRoomId) {
+      if (!data || typeof data !== 'object') return '';
+      const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+      const byRoom = data.caption_by_room && typeof data.caption_by_room === 'object'
+        ? data.caption_by_room
+        : {};
+      const candidates = [
+        byRoom[activeRoomId],
+        data.caption,
+        payload.caption,
+        payload.llm_caption,
+        payload.summary_caption,
+      ];
+      for (const c of candidates) {
+        if (typeof c === 'string' && c.trim()) return c.trim();
+      }
+      return '';
+    }
+
+    // ── Main boot ─────────────────────────────────────────────────────────────
+    async function main() {
+      const loadingEl  = document.getElementById('loading');
+      const panelTitle = document.getElementById('panel-title');
+      const panelSubtitle = document.getElementById('panel-subtitle');
+      const panelCaption = document.getElementById('panel-caption');
+      const detailEl   = document.getElementById('sensor-detail');
+      const clearBtn   = document.getElementById('clear-selection');
+      const statusEl   = document.getElementById('stream-status');
+      const sceneContainer = document.getElementById('scene-container');
+      const chatMessagesEl = document.getElementById('chat-messages');
+      const chatInputEl = document.getElementById('chat-input');
+      const chatSendBtn = document.getElementById('chat-send');
+      const tabInsightsBtn = document.getElementById('tab-insights');
+      const tabControlBtn = document.getElementById('tab-control');
+      const tabSensorCfgBtn = document.getElementById('tab-sensor-config');
+      const pageInsights = document.getElementById('panel-page-insights');
+      const pageControl = document.getElementById('panel-page-control');
+      const pageSensorCfg = document.getElementById('panel-page-sensor-config');
+
+      let selectedPanel = null;
+      let selectedVisual = null;
+      const roomId = 'living_room';
+      let latestAttrs = {};
+      let latestPayload = {};
+      let latestPayloadByAgent = {};
+      let latestCaption = '';
+      let lastTimestamp = '';
+      let failedCount = 0;
+
+      function appendChatMessage(text, role = 'assistant') {
+        if (!chatMessagesEl || !text) return;
+        const item = document.createElement('div');
+        item.className = `chat-msg ${role === 'user' ? 'chat-msg-user' : 'chat-msg-assistant'}`;
+        item.textContent = text;
+        chatMessagesEl.appendChild(item);
+        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+      }
+
+      function sendChatMessage() {
+        if (!chatInputEl) return;
+        const text = (chatInputEl.value || '').trim();
+        if (!text) return;
+        appendChatMessage(text, 'user');
+        appendChatMessage('Received.', 'assistant');
+        chatInputEl.value = '';
+      }
+
+      if (chatSendBtn) chatSendBtn.addEventListener('click', sendChatMessage);
+      if (chatInputEl) {
+        chatInputEl.addEventListener('keydown', (evt) => {
+          if (evt.key === 'Enter') sendChatMessage();
+        });
+      }
+
+      function setRightPanelPage(page) {
+        const insights = page === 'insights';
+        const control = page === 'control';
+        const sensorcfg = page === 'sensor-config';
+        if (pageInsights) pageInsights.classList.toggle('active', insights);
+        if (pageControl) pageControl.classList.toggle('active', control);
+        if (pageSensorCfg) pageSensorCfg.classList.toggle('active', sensorcfg);
+        if (tabInsightsBtn) tabInsightsBtn.classList.toggle('active', insights);
+        if (tabControlBtn) tabControlBtn.classList.toggle('active', control);
+        if (tabSensorCfgBtn) tabSensorCfgBtn.classList.toggle('active', sensorcfg);
+      }
+
+      if (tabInsightsBtn) tabInsightsBtn.addEventListener('click', () => setRightPanelPage('insights'));
+      if (tabControlBtn) tabControlBtn.addEventListener('click', () => setRightPanelPage('control'));
+      if (tabSensorCfgBtn) tabSensorCfgBtn.addEventListener('click', () => setRightPanelPage('sensor-config'));
+
+      try {
+        const THREE = window.THREE;
+        if (!THREE) throw new Error('Three.js module not available — check network/CSP');
+
+        const controlResultEl = document.getElementById('control-last-result');
+        const controlCapLine = document.getElementById('control-cap-line');
+        const controlMqttLine = document.getElementById('control-mqtt-line');
+        const controlModeLine = document.getElementById('control-mode-line');
+        const controlAgentModeLine = document.getElementById('control-agent-mode-line');
+        const controlSubtabManualBtn = document.getElementById('control-subtab-manual');
+        const controlSubtabAutoBtn = document.getElementById('control-subtab-auto');
+        const controlSubpageManual = document.getElementById('control-subpage-manual');
+        const controlSubpageAuto = document.getElementById('control-subpage-auto');
+        const autoAgentListEl = document.getElementById('auto-agent-list');
+        const autoAgentSelectedEl = document.getElementById('auto-agent-selected');
+        const autoSupportPresetEl = document.getElementById('auto-support-preset');
+        const autoSupportRulesEl = document.getElementById('auto-support-rules');
+        const autoSupportThresholdEl = document.getElementById('auto-support-threshold');
+        const autoRuleSelectEl = document.getElementById('auto-rule-select');
+        const autoRuleAddBtn = document.getElementById('auto-rule-add-btn');
+        const autoRulePickedListEl = document.getElementById('auto-rule-picked-list');
+        const autoRulesControlsEl = document.getElementById('auto-rules-controls');
+        const autoRulesApplyRowEl = document.getElementById('auto-rules-apply-row');
+        const autoRuleActionEl = document.getElementById('auto-rule-action');
+        const autoApplyBtn = document.getElementById('auto-apply-btn');
+        const presetAgentEl = document.getElementById('preset-agent');
+        const presetModeEl = document.getElementById('preset-mode');
+        const presetApplyBtn = document.getElementById('preset-apply-btn');
+        const clubhouseModeTitleEl = document.getElementById('clubhouse-mode-title');
+        const clubhouseModeNoteEl = document.getElementById('clubhouse-mode-note');
+        const clubhouseModeAgentRowEl = document.getElementById('clubhouse-mode-agent-row');
+        const clubhouseModeValueRowEl = document.getElementById('clubhouse-mode-value-row');
+        const thresholdAgentEl = document.getElementById('threshold-agent');
+        const thresholdTypeEl = document.getElementById('threshold-type');
+        const thresholdValueEl = document.getElementById('threshold-value');
+        const thresholdApplyBtn = document.getElementById('threshold-apply-btn');
+        const sensorCfgTargetAgentEl = document.getElementById('sensorcfg-target-agent');
+        const sensorCfgActionEl = document.getElementById('sensorcfg-action');
+        const sensorCfgListLabelEl = document.getElementById('sensorcfg-list-label');
+        const sensorCfgIdListEl = document.getElementById('sensorcfg-id-list');
+        const sensorCfgApplyBtn = document.getElementById('sensorcfg-apply-btn');
+        const sensorCfgResultEl = document.getElementById('sensorcfg-result');
+        const sensorCfgBoundByAgent = Object.create(null);
+        const sensorCfgSelectedByKey = Object.create(null);
+        let lastControlCaps = null;
+        let lastAutomationCatalog = null;
+        let selectedAutoAgent = '';
+        let selectedRuleSetIds = [];
+        let currentControlMode = 'unknown';
+        let pendingControlMode = '';
+
+        const RULE_TARGETS = {
+          clubhouse_all_normal: ['all'],
+          clubhouse_all_clean: ['all'],
+          clubhouse_back_read: ['back'],
+          clubhouse_back_nap: ['back'],
+          clubhouse_front_read: ['front'],
+          clubhouse_front_nap: ['front'],
+          energy_aircon_ir_temperature: ['aircon'],
+          energy_hue_ir_light: ['hue_light'],
+        };
+        const RULE_LABELS = {
+          clubhouse_all_normal: 'Clubhouse all-normal',
+          clubhouse_all_clean: 'Clubhouse all-clean',
+          clubhouse_back_read: 'Clubhouse back-read',
+          clubhouse_back_nap: 'Clubhouse back-nap',
+          clubhouse_front_read: 'Clubhouse front-read',
+          clubhouse_front_nap: 'Clubhouse front-nap',
+          energy_aircon_ir_temperature: 'Energy aircon_ir_temperature',
+          energy_hue_ir_light: 'Energy hue_ir_light',
+        };
+        function friendlyAgentLabel(aid) {
+          if (aid === 'all' || aid === 'back' || aid === 'front') return `clubhouse (${aid})`;
+          return aid;
+        }
+        function modeOptionsForAgent(aid) {
+          if (aid === 'all') return ['normal', 'clean'];
+          if (aid === 'back' || aid === 'front') return ['read', 'nap'];
+          return [];
+        }
+        function canonicalControlAgent(aid) {
+          const raw = String(aid || '').toLowerCase();
+          if (!raw) return '';
+          if (raw === 'all' || raw === 'back' || raw === 'front') return raw;
+          if (raw.includes('aircon')) return 'aircon';
+          if (raw.includes('hue') || raw.includes('light_hue') || raw.includes('hue_light')) return 'hue_light';
+          return raw;
+        }
+
+        function setControlResult(text) {
+          if (controlResultEl) controlResultEl.textContent = text || '';
+        }
+        function setSensorCfgResult(text) {
+          if (sensorCfgResultEl) sensorCfgResultEl.textContent = text || '';
+        }
+        function normalizeSensorIdList(input) {
+          if (Array.isArray(input)) {
+            return input.map((x) => String(x || '').trim()).filter(Boolean);
+          }
+          if (input && typeof input === 'object') {
+            const flat = [];
+            Object.values(input).forEach((value) => {
+              if (Array.isArray(value)) value.forEach((sid) => flat.push(String(sid || '').trim()));
+            });
+            return flat.filter(Boolean);
+          }
+          return [];
+        }
+        function groupSensorIdsByType(sensorIds) {
+          const grouped = {};
+          (Array.isArray(sensorIds) ? sensorIds : []).forEach((sid) => {
+            const id = String(sid || '').trim();
+            if (!id) return;
+            const parts = id.split('_');
+            const stype = (parts[0] || 'unknown').toLowerCase();
+            if (!grouped[stype]) grouped[stype] = [];
+            grouped[stype].push(id);
+          });
+          return grouped;
+        }
+        function sensorCfgSelectionKey(targetAgentId, action) {
+          return `${String(targetAgentId || '').trim()}::${String(action || 'add').trim()}`;
+        }
+        function rememberSensorCfgSelections() {
+          if (!sensorCfgIdListEl) return;
+          const target = sensorCfgTargetAgentEl ? sensorCfgTargetAgentEl.value : '';
+          const action = sensorCfgActionEl ? sensorCfgActionEl.value : 'add';
+          const key = sensorCfgSelectionKey(target, action);
+          const selected = Array.from(sensorCfgIdListEl.querySelectorAll('input[type="checkbox"]:checked'))
+            .map((el) => String(el.value || '').trim())
+            .filter(Boolean);
+          sensorCfgSelectedByKey[key] = selected;
+        }
+        async function refreshSensorBindingsForTarget(targetAgentId, options = {}) {
+          const target = String(targetAgentId || '').trim();
+          if (!target) return;
+          const quiet = Boolean(options.quiet);
+          if (!quiet) setSensorCfgResult('Loading bound sensors...');
+          try {
+            const j = await postJson('/api/sensor-config/apply', {
+              target_agent_id: target,
+              action: 'list',
+              sensor_config: {},
+            });
+            if (j && j.success) {
+              sensorCfgBoundByAgent[target] = normalizeSensorIdList(j.current_sensors);
+              if (!quiet) setSensorCfgResult('Bound sensors loaded.');
+            } else if (!quiet) {
+              setSensorCfgResult(`${j && j.success ? 'OK' : 'Failed'}: ${(j && j.message) || 'Could not load bound sensors.'}`);
+            }
+          } catch (e) {
+            if (!quiet) setSensorCfgResult(String(e && e.message ? e.message : e));
+          }
+        }
+        function renderControlModeReadout() {
+          if (controlModeLine) controlModeLine.textContent = `Control mode: ${currentControlMode || 'unknown'}`;
+          if (!controlAgentModeLine) return;
+          const selectedLabel = selectedAutoAgent ? friendlyAgentLabel(selectedAutoAgent) : 'none';
+          let modeText = 'unknown';
+          const selectedPayload = selectedAutoAgent && latestPayloadByAgent
+            ? (latestPayloadByAgent[selectedAutoAgent] || {})
+            : {};
+          const selectedState = selectedPayload && typeof selectedPayload.state === 'object'
+            ? selectedPayload.state
+            : {};
+          if (selectedAutoAgent === 'all' || selectedAutoAgent === 'back' || selectedAutoAgent === 'front') {
+            if (selectedState.preset_mode !== undefined) modeText = String(selectedState.preset_mode);
+            else if (latestAttrs && latestAttrs.preset_mode !== undefined) modeText = String(latestAttrs.preset_mode);
+          } else {
+            if (selectedState.mode_name !== undefined) modeText = String(selectedState.mode_name);
+            else if (latestAttrs && latestAttrs.mode_name !== undefined) modeText = String(latestAttrs.mode_name);
+          }
+          controlAgentModeLine.textContent = `Selected agent mode (${selectedLabel}): ${modeText}`;
+        }
+        async function setControlMode(mode, opts = {}) {
+          if (mode !== 'manual' && mode !== 'automated') return;
+          const quiet = !!opts.quiet;
+          if (!quiet) setControlResult(`Switching control mode to ${mode}…`);
+          pendingControlMode = mode;
+          // Optimistic local mode for immediate UI interactivity.
+          currentControlMode = mode;
+          renderControlModeReadout();
+          try {
+            const j = await postJson('/api/control/mode', { mode });
+            const reported = (j && (j.mode === 'manual' || j.mode === 'automated')) ? j.mode : currentControlMode;
+            currentControlMode = reported;
+            // Clear pending only on explicit backend confirmation.
+            if (j && j.success && reported === pendingControlMode) pendingControlMode = '';
+            renderControlModeReadout();
+            if (!quiet) setControlResult(`${j.success ? 'OK' : 'Failed'}: ${j.message || ''}`.trim());
+            await refreshControlUi();
+          } catch (e) {
+            // Keep pending so stale backend polls cannot immediately revert local selection.
+            if (!quiet) setControlResult(String(e && e.message ? e.message : e));
+          }
+        }
+        function setControlSubtab(tab, opts = {}) {
+          const manual = tab !== 'auto';
+          if (controlSubpageManual) controlSubpageManual.classList.toggle('active', manual);
+          if (controlSubpageAuto) controlSubpageAuto.classList.toggle('active', !manual);
+          if (controlSubtabManualBtn) controlSubtabManualBtn.classList.toggle('active', manual);
+          if (controlSubtabAutoBtn) controlSubtabAutoBtn.classList.toggle('active', !manual);
+          if (opts.syncMode) {
+            const desiredMode = manual ? 'manual' : 'automated';
+            if (currentControlMode !== desiredMode) void setControlMode(desiredMode, { quiet: !!opts.quietModeSwitch });
+          }
+        }
+        if (controlSubtabManualBtn) controlSubtabManualBtn.addEventListener('click', () => setControlSubtab('manual', { syncMode: true }));
+        if (controlSubtabAutoBtn) controlSubtabAutoBtn.addEventListener('click', () => setControlSubtab('auto', { syncMode: true }));
+
+        async function postJson(url, body) {
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+          return j;
+        }
+
+        function renderAutoAgentList(cap) {
+          if (!autoAgentListEl || !cap || !Array.isArray(cap.agents)) return;
+          autoAgentListEl.innerHTML = '';
+          cap.agents.forEach((aid) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `control-btn agent-btn ${aid === selectedAutoAgent ? 'active' : ''}`;
+            btn.textContent = friendlyAgentLabel(aid);
+            btn.addEventListener('click', () => {
+              selectedAutoAgent = aid;
+              renderAutoAgentList(cap);
+              renderSelectedAgentDetails();
+            });
+            autoAgentListEl.appendChild(btn);
+          });
+        }
+
+        function fillThresholdTypeByAgent(agentId) {
+          if (!thresholdTypeEl) return;
+          if (agentId === 'aircon') thresholdTypeEl.innerHTML = '<option value="temperature">temperature</option>';
+          else if (agentId === 'hue_light') thresholdTypeEl.innerHTML = '<option value="light">light</option>';
+          else thresholdTypeEl.innerHTML = '';
+        }
+
+        function renderSelectedAgentDetails() {
+          const caps = lastControlCaps || {};
+          const profile = (caps.agent_capabilities || {})[selectedAutoAgent] || {};
+          if (autoAgentSelectedEl) autoAgentSelectedEl.textContent = `Selected agent: ${selectedAutoAgent ? friendlyAgentLabel(selectedAutoAgent) : 'none'}`;
+          const presetSupported = !!profile.preset;
+          const rulesSupported = !!profile.rules;
+          const thresholdSupported = !!profile.threshold;
+          const isClubhouse = ['all', 'back', 'front'].includes(selectedAutoAgent);
+          const rulesSupportedUi = rulesSupported && !isClubhouse;
+          const automationLocked = (
+            currentControlMode !== 'automated' ||
+            !!caps.mode_conflict ||
+            caps.control_mqtt_available === false
+          );
+          if (autoSupportPresetEl) autoSupportPresetEl.textContent = `Preset: ${presetSupported ? 'supported' : 'unsupported'}`;
+          if (autoSupportRulesEl) {
+            autoSupportRulesEl.textContent = isClubhouse
+              ? 'Rules: hidden for clubhouse demo (use mode below)'
+              : `Rules: ${rulesSupported ? 'supported' : 'unsupported'}`;
+          }
+          if (autoSupportThresholdEl) autoSupportThresholdEl.textContent = `Threshold: ${thresholdSupported ? 'supported' : 'unsupported'}`;
+          if (presetAgentEl) presetAgentEl.innerHTML = selectedAutoAgent ? `<option value="${selectedAutoAgent}">${selectedAutoAgent}</option>` : '<option value="">(none)</option>';
+          if (presetModeEl) {
+            const options = modeOptionsForAgent(selectedAutoAgent);
+            if (options.length > 0) {
+              const current = presetModeEl.value;
+              presetModeEl.innerHTML = options.map((m) => `<option value="${m}">${m}</option>`).join('');
+              if (options.includes(current)) presetModeEl.value = current;
+            }
+          }
+          if (thresholdAgentEl) thresholdAgentEl.innerHTML = selectedAutoAgent ? `<option value="${selectedAutoAgent}">${selectedAutoAgent}</option>` : '<option value="">(none)</option>';
+          fillThresholdTypeByAgent(selectedAutoAgent);
+          if (presetApplyBtn) presetApplyBtn.disabled = !presetSupported || automationLocked;
+          if (autoApplyBtn) autoApplyBtn.disabled = !rulesSupportedUi || automationLocked;
+          if (thresholdApplyBtn) thresholdApplyBtn.disabled = !thresholdSupported || automationLocked;
+          if (autoRulesControlsEl) autoRulesControlsEl.style.display = rulesSupportedUi ? '' : 'none';
+          if (autoRulePickedListEl) autoRulePickedListEl.style.display = rulesSupportedUi ? '' : 'none';
+          if (autoRulesApplyRowEl) autoRulesApplyRowEl.style.display = rulesSupportedUi ? '' : 'none';
+          if (clubhouseModeTitleEl) clubhouseModeTitleEl.style.display = presetSupported ? '' : 'none';
+          if (clubhouseModeNoteEl) clubhouseModeNoteEl.style.display = presetSupported ? '' : 'none';
+          if (clubhouseModeAgentRowEl) clubhouseModeAgentRowEl.style.display = presetSupported ? '' : 'none';
+          if (clubhouseModeValueRowEl) clubhouseModeValueRowEl.style.display = presetSupported ? '' : 'none';
+          const selectedCanonical = canonicalControlAgent(selectedAutoAgent);
+          const allowedRuleIds = Object.keys(RULE_TARGETS).filter((rid) => (RULE_TARGETS[rid] || []).includes(selectedCanonical));
+          selectedRuleSetIds = selectedRuleSetIds.filter((rid) => allowedRuleIds.includes(rid));
+          if (!rulesSupportedUi) selectedRuleSetIds = [];
+          if (autoRuleSelectEl) {
+            autoRuleSelectEl.innerHTML = allowedRuleIds.length
+              ? allowedRuleIds.map((rid) => `<option value="${rid}">${RULE_LABELS[rid] || rid}</option>`).join('')
+              : '<option value="">(no rules for this agent)</option>';
+            autoRuleSelectEl.disabled = !rulesSupportedUi || allowedRuleIds.length === 0;
+          }
+          if (autoRuleAddBtn) autoRuleAddBtn.disabled = !rulesSupportedUi || allowedRuleIds.length === 0;
+          if (autoRulePickedListEl) {
+            autoRulePickedListEl.innerHTML = '';
+            selectedRuleSetIds.forEach((rid) => {
+              const row = document.createElement('div');
+              row.className = 'control-row';
+              row.innerHTML = `<span style="min-width:auto">${RULE_LABELS[rid] || rid}</span> <button type="button" class="control-btn" data-remove-rule-id="${rid}">Remove</button>`;
+              autoRulePickedListEl.appendChild(row);
+            });
+          }
+          renderControlModeReadout();
+        }
+
+        function renderSensorConfigControls() {
+          rememberSensorCfgSelections();
+          const cap = lastControlCaps || {};
+          const catalog = lastAutomationCatalog || {};
+          const agents = Array.isArray(cap.agents) ? cap.agents : [];
+          if (sensorCfgTargetAgentEl) {
+            const previous = sensorCfgTargetAgentEl.value;
+            sensorCfgTargetAgentEl.innerHTML = agents.length
+              ? agents.map((a) => `<option value="${a}">${a}</option>`).join('')
+              : '<option value="">(no agents)</option>';
+            if (previous && agents.includes(previous)) sensorCfgTargetAgentEl.value = previous;
+          }
+          const selectedTarget = sensorCfgTargetAgentEl ? sensorCfgTargetAgentEl.value : '';
+          const selectedAction = sensorCfgActionEl ? sensorCfgActionEl.value : 'add';
+          const allSensorIds = normalizeSensorIdList(catalog.available_sensor_ids);
+          const boundIds = normalizeSensorIdList(sensorCfgBoundByAgent[selectedTarget] || []);
+          const boundSet = new Set(boundIds);
+          const availableIds = allSensorIds.filter((sid) => !boundSet.has(sid));
+          const showingIds = selectedAction === 'remove' ? boundIds : availableIds;
+          const selectionKey = sensorCfgSelectionKey(selectedTarget, selectedAction);
+          const savedSelection = new Set((sensorCfgSelectedByKey[selectionKey] || []).filter((sid) => showingIds.includes(sid)));
+          sensorCfgSelectedByKey[selectionKey] = Array.from(savedSelection);
+          if (sensorCfgListLabelEl) {
+            sensorCfgListLabelEl.textContent = selectedAction === 'remove'
+              ? 'Select currently bound sensors to remove:'
+              : 'Select available sensors to add:';
+          }
+          if (sensorCfgIdListEl) {
+            sensorCfgIdListEl.innerHTML = '';
+            showingIds.forEach((sid) => {
+              const label = document.createElement('label');
+              label.className = 'control-row';
+              label.innerHTML = `<input type="checkbox" value="${sid}" /> <span style="min-width:auto">${sid}</span>`;
+              const input = label.querySelector('input[type="checkbox"]');
+              if (input) input.checked = savedSelection.has(sid);
+              sensorCfgIdListEl.appendChild(label);
+            });
+            if (showingIds.length === 0) {
+              const empty = document.createElement('p');
+              empty.className = 'panel-note';
+              empty.style.margin = '4px 0';
+              empty.textContent = selectedAction === 'remove'
+                ? 'No bound sensors for this agent.'
+                : 'No available sensors to add.';
+              sensorCfgIdListEl.appendChild(empty);
+            }
+          }
+          if (sensorCfgApplyBtn) sensorCfgApplyBtn.disabled = !selectedTarget || showingIds.length === 0;
+        }
+
+        function applyControlCapabilities(cap) {
+          lastControlCaps = cap || {};
+          if (
+            cap &&
+            (cap.control_mode === 'manual' || cap.control_mode === 'automated') &&
+            (!pendingControlMode || cap.control_mode === pendingControlMode)
+          ) {
+            currentControlMode = cap.control_mode;
+            if (pendingControlMode && cap.control_mode === pendingControlMode) pendingControlMode = '';
+          }
+          if (controlCapLine) {
+            const ag = (cap.agents && cap.agents.length)
+              ? cap.agents.map((a) => friendlyAgentLabel(a)).join(', ')
+              : 'none yet (waiting for MQTT)';
+            controlCapLine.textContent = `Agents seen on stream: ${ag}`;
+          }
+          if (controlMqttLine) {
+            if (cap.control_mqtt_available === false) {
+              controlMqttLine.style.display = '';
+              controlMqttLine.textContent = 'Manual control: server could not open an MQTT client for commands.';
+            } else if (cap.mode_conflict) {
+              controlMqttLine.style.display = '';
+              controlMqttLine.textContent = cap.mode_conflict_message || 'Running mode conflict';
+            } else if (currentControlMode === 'unknown') {
+              controlMqttLine.style.display = '';
+              controlMqttLine.textContent = 'Waiting for control mode from context manager…';
+            } else {
+              controlMqttLine.style.display = 'none';
+            }
+          }
+          const clubhouseAgents = (cap.agents || []).filter((aid) => aid === 'all' || aid === 'back' || aid === 'front');
+          const selectedClubhouseAgent = clubhouseAgents.includes(selectedAutoAgent)
+            ? selectedAutoAgent
+            : (clubhouseAgents[0] || '');
+          const resolvedLightAgent = (
+            clubhouseAgents.length > 1 && (cap.light_agent === 'all' || cap.light_agent === 'back' || cap.light_agent === 'front')
+          ) ? selectedClubhouseAgent : cap.light_agent;
+          const resolvedAirconAgent = (
+            clubhouseAgents.length > 1 && (cap.aircon_agent === 'all' || cap.aircon_agent === 'back' || cap.aircon_agent === 'front')
+          ) ? selectedClubhouseAgent : cap.aircon_agent;
+          const rows = [
+            { prefix: 'ctl-light', agent: resolvedLightAgent },
+            { prefix: 'ctl-ac', agent: resolvedAirconAgent },
+          ];
+          for (const { prefix, agent } of rows) {
+            ['on', 'off'].forEach((which) => {
+              const btn = document.getElementById(`${prefix}-${which}`);
+              if (!btn) return;
+              const act = which === 'on' ? 'turn_on' : 'turn_off';
+              const blocked = (
+                !agent ||
+                cap.control_mqtt_available === false ||
+                cap.mode_conflict ||
+                currentControlMode !== 'manual'
+              );
+              btn.disabled = blocked;
+              btn.dataset.agent = agent || '';
+              btn.dataset.action = act;
+              // Clubhouse agent uses explicit per-target manual control.
+              const lowerAid = String(agent || '').toLowerCase();
+              const isClubhouse = (lowerAid === 'all' || lowerAid === 'back' || lowerAid === 'front');
+              if (isClubhouse) {
+                btn.dataset.target = (prefix === 'ctl-light') ? 'light' : 'aircon';
+              } else {
+                delete btn.dataset.target;
+              }
+            });
+          }
+          if (!selectedAutoAgent || !cap.agents.includes(selectedAutoAgent)) selectedAutoAgent = cap.agents[0] || '';
+          renderAutoAgentList(cap);
+          renderSelectedAgentDetails();
+          renderSensorConfigControls();
+          renderControlModeReadout();
+        }
+
+        async function refreshControlUi() {
+          try {
+            const [capRes, catRes, modeRes] = await Promise.all([
+              fetch('/api/control/capabilities', { cache: 'no-store' }),
+              fetch('/api/automation/catalog', { cache: 'no-store' }),
+              fetch('/api/control/mode', { cache: 'no-store' }),
+            ]);
+            if (modeRes.ok) {
+              const modePayload = await modeRes.json();
+              if (modePayload && (modePayload.mode === 'manual' || modePayload.mode === 'automated')) {
+                if (!pendingControlMode || modePayload.mode === pendingControlMode) {
+                  currentControlMode = modePayload.mode;
+                  if (pendingControlMode && modePayload.mode === pendingControlMode) pendingControlMode = '';
+                }
+              }
+            }
+            if (capRes.ok) applyControlCapabilities(await capRes.json());
+            if (catRes.ok) {
+              lastAutomationCatalog = await catRes.json();
+              const currentTarget = sensorCfgTargetAgentEl ? sensorCfgTargetAgentEl.value : '';
+              if (currentTarget && !sensorCfgBoundByAgent[currentTarget]) {
+                await refreshSensorBindingsForTarget(currentTarget, { quiet: true });
+              }
+              renderSensorConfigControls();
+            }
+            if (!pendingControlMode) {
+              if (currentControlMode === 'manual') setControlSubtab('manual', { syncMode: false });
+              else if (currentControlMode === 'automated') setControlSubtab('auto', { syncMode: false });
+            }
+            renderControlModeReadout();
+          } catch (_) {}
+        }
+
+        async function sendManualControl(agentId, actionName, parameters) {
+          if (!agentId) return;
+          setControlResult('Sending…');
+          try {
+            const body = { agent_id: agentId, action_name: actionName };
+            if (parameters && typeof parameters === 'object') body.parameters = parameters;
+            const j = await postJson('/api/control/command', body);
+            setControlResult(`${j.success ? 'OK' : 'Failed'}: ${j.message || ''}`.trim());
+          } catch (e) {
+            setControlResult(String(e && e.message ? e.message : e));
+          }
+        }
+
+        async function applyAutomationRules() {
+          if (!selectedAutoAgent) return;
+          let ruleSetIds = [...selectedRuleSetIds];
+          if (ruleSetIds.length === 0 && autoRuleSelectEl && autoRuleSelectEl.value) {
+            ruleSetIds = [autoRuleSelectEl.value];
+          }
+          if (ruleSetIds.length === 0) {
+            setControlResult('Please pick at least one rule for this agent.');
+            return;
+          }
+          try {
+            setControlResult('Applying rules…');
+            const j = await postJson('/api/automation/rules/apply', {
+              action: autoRuleActionEl ? autoRuleActionEl.value : 'switch',
+              selected_agents: [selectedAutoAgent],
+              rule_set_ids: ruleSetIds,
+            });
+            setControlResult(`${j.success ? 'OK' : 'Failed'}: ${j.message || ''}`);
+          } catch (e) {
+            setControlResult(String(e && e.message ? e.message : e));
+          }
+        }
+
+        async function applyPresetMode() {
+          if (!selectedAutoAgent || !presetModeEl) return;
+          try {
+            setControlResult('Applying preset mode…');
+            const j = await postJson('/api/automation/preset/apply', { agent_id: selectedAutoAgent, mode: presetModeEl.value });
+            setControlResult(`${j.success ? 'OK' : 'Failed'}: ${j.message || ''}`);
+          } catch (e) {
+            setControlResult(String(e && e.message ? e.message : e));
+          }
+        }
+
+        async function applyThreshold() {
+          if (!selectedAutoAgent || !thresholdTypeEl || !thresholdValueEl) return;
+          if (thresholdValueEl.value === '') return;
+          try {
+            setControlResult('Applying threshold…');
+            const j = await postJson('/api/automation/threshold/apply', {
+              agent_id: selectedAutoAgent,
+              threshold_type: thresholdTypeEl.value,
+              threshold: Number(thresholdValueEl.value),
+            });
+            setControlResult(`${j.success ? 'OK' : 'Failed'}: ${j.message || ''}`);
+          } catch (e) {
+            setControlResult(String(e && e.message ? e.message : e));
+          }
+        }
+
+        async function applySensorConfig() {
+          const target = sensorCfgTargetAgentEl ? sensorCfgTargetAgentEl.value : '';
+          const action = sensorCfgActionEl ? sensorCfgActionEl.value : 'add';
+          const selectedIds = Array.from(document.querySelectorAll('#sensorcfg-id-list input[type="checkbox"]:checked')).map((el) => el.value);
+          if (!target) {
+            setSensorCfgResult('Please select a target agent first.');
+            return;
+          }
+          if (selectedIds.length === 0) {
+            setSensorCfgResult(`Please select at least one sensor to ${action}.`);
+            return;
+          }
+          const payload = {
+            target_agent_id: target,
+            action,
+            sensor_config: groupSensorIdsByType(selectedIds),
+          };
+          try {
+            setSensorCfgResult('Applying sensor config…');
+            const j = await postJson('/api/sensor-config/apply', payload);
+            setSensorCfgResult(`${j.success ? 'OK' : 'Failed'}: ${j.message || ''}`);
+            if (j && j.success) {
+              await refreshSensorBindingsForTarget(target, { quiet: true });
+              renderSensorConfigControls();
+            }
+          } catch (e) {
+            setSensorCfgResult(String(e && e.message ? e.message : e));
+          }
+        }
+
+        const controlPanelRoot = document.getElementById('control-panel');
+        if (controlPanelRoot) {
+          controlPanelRoot.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-agent][data-action]');
+            if (!btn || btn.disabled) return;
+            e.preventDefault();
+            const agent = btn.getAttribute('data-agent');
+            const action = btn.getAttribute('data-action');
+            const target = btn.getAttribute('data-target');
+            const params = target ? { target } : null;
+            if (agent && action) void sendManualControl(agent, action, params);
+          });
+        }
+        if (autoApplyBtn) autoApplyBtn.addEventListener('click', () => void applyAutomationRules());
+        if (autoRuleAddBtn) {
+          autoRuleAddBtn.addEventListener('click', () => {
+            const rid = autoRuleSelectEl ? autoRuleSelectEl.value : '';
+            if (!rid || selectedRuleSetIds.includes(rid)) return;
+            selectedRuleSetIds.push(rid);
+            renderSelectedAgentDetails();
+          });
+        }
+        if (autoRulePickedListEl) {
+          autoRulePickedListEl.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-remove-rule-id]');
+            if (!btn) return;
+            const rid = btn.getAttribute('data-remove-rule-id');
+            selectedRuleSetIds = selectedRuleSetIds.filter((x) => x !== rid);
+            renderSelectedAgentDetails();
+          });
+        }
+        if (presetApplyBtn) presetApplyBtn.addEventListener('click', () => void applyPresetMode());
+        if (thresholdApplyBtn) thresholdApplyBtn.addEventListener('click', () => void applyThreshold());
+        if (sensorCfgApplyBtn) sensorCfgApplyBtn.addEventListener('click', () => void applySensorConfig());
+        if (sensorCfgActionEl) sensorCfgActionEl.addEventListener('change', () => renderSensorConfigControls());
+        if (sensorCfgIdListEl) {
+          sensorCfgIdListEl.addEventListener('change', (e) => {
+            const target = e.target;
+            if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
+            rememberSensorCfgSelections();
+          });
+        }
+        if (sensorCfgTargetAgentEl) {
+          sensorCfgTargetAgentEl.addEventListener('change', () => {
+            const target = sensorCfgTargetAgentEl.value;
+            void (async () => {
+              await refreshSensorBindingsForTarget(target, { quiet: false });
+              renderSensorConfigControls();
+            })();
+          });
+        }
+
+        const config = await loadRoomXML('new_smart_room.xml');
+        totalXmlSensors = config.sensors.length;
+        document.getElementById('room-title').textContent = config.room.name;
+        document.getElementById('room-desc').textContent  = config.room.description;
+        document.getElementById('hud').style.display      = '';
+        document.getElementById('legend').style.display   = '';
+
+        const { room, walls, furniture, sensors } = config;
+        const W = room.width, D = room.depth, H = room.wallHeight, T = room.wallThickness;
+
+        // ── Scene setup ───────────────────────────────────────────────────────
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xe8f0fa);
+        scene.fog = new THREE.Fog(0xe8f0fa, 18, 42);
+
+        const camera = new THREE.PerspectiveCamera(52, sceneContainer.clientWidth / sceneContainer.clientHeight, 0.1, 120);
+        camera.position.set(W / 2, H * 2.4, D * 1.1);
+        camera.lookAt(W / 2, 0, D / 2);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(sceneContainer.clientWidth, sceneContainer.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        sceneContainer.appendChild(renderer.domElement);
+
+        // OrbitControls
+        if (typeof window.OrbitControls !== 'function') {
+          try { const mod = await import('https://esm.sh/three@0.170.0/examples/jsm/controls/OrbitControls.js'); window.OrbitControls = mod.OrbitControls; } catch(e) {}
+        }
+        let controls;
+        if (typeof window.OrbitControls === 'function') {
+          controls = new window.OrbitControls(camera, renderer.domElement);
+          controls.target.set(W / 2, 0.8, D / 2);
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.06;
+          controls.maxPolarAngle = Math.PI * 0.48;
+          controls.minDistance = 2;
+          controls.maxDistance = 28;
+        } else {
+          controls = { target: new THREE.Vector3(W/2, 0.8, D/2), update: () => camera.lookAt(W/2, 0.8, D/2) };
+          controls.update();
+        }
+
+        // ── Lighting ─────────────────────────────────────────────────────────
+        scene.add(new THREE.AmbientLight(0xe8eef5, 0.78));
+        const sun = new THREE.DirectionalLight(0xfff8f0, 1.55);
+        sun.position.set(2, 14, 4);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 0.5;
+        sun.shadow.camera.far = 40;
+        sun.shadow.camera.left = -6; sun.shadow.camera.right = 14;
+        sun.shadow.camera.top  = 14; sun.shadow.camera.bottom = -4;
+        scene.add(sun);
+
+        // ── Materials & GLB helpers (asset walls / furniture; no floor mesh) ──
+        const matWall = new THREE.MeshStandardMaterial({ color: 0xd5dde8, roughness: 0.82, metalness: 0 });
+
+        function addBox(w, h, d, x, y, z, mat) {
+          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat || matWall);
+          m.position.set(x, y, z);
+          m.castShadow = true; m.receiveShadow = true;
+          scene.add(m); return m;
+        }
+
+        let GLTFLoader = window.GLTFLoader;
+        if (!GLTFLoader) {
+          const mod = await import('https://esm.sh/three@0.170.0/examples/jsm/loaders/GLTFLoader.js');
+          window.GLTFLoader = mod.GLTFLoader;
+          GLTFLoader = mod.GLTFLoader;
+        }
+        const gltfLoader = new GLTFLoader();
+
+        function setShadowAndCloneMaterials(root, outMaterials = [], userData = null) {
+          root.traverse(node => {
+            if (!node.isMesh) return;
+            node.castShadow = true;
+            node.receiveShadow = true;
+            if (node.material) {
+              node.material = node.material.clone();
+              outMaterials.push(node.material);
+            }
+            if (userData) Object.assign(node.userData, userData);
+          });
+        }
+
+        function fitAssetToSize(root, targetW, targetH, targetD) {
+          const bbox = new THREE.Box3().setFromObject(root);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const sx = targetW / Math.max(size.x, 0.001);
+          const sy = targetH / Math.max(size.y, 0.001);
+          const sz = targetD / Math.max(size.z, 0.001);
+          root.scale.set(sx, sy, sz);
+          root.updateMatrixWorld(true);
+          const fittedBbox = new THREE.Box3().setFromObject(root);
+          const center = new THREE.Vector3();
+          fittedBbox.getCenter(center);
+          root.position.sub(center);
+        }
+
+        function addFittedAsset(assetPath, opts = {}) {
+          const group = new THREE.Group();
+          group.position.set(opts.position?.x || 0, opts.position?.y || 0, opts.position?.z || 0);
+          if (opts.rotationYDeg) group.rotation.y = (Math.PI * opts.rotationYDeg) / 180;
+          scene.add(group);
+          gltfLoader.load(assetPath, (gltf) => {
+            const root = gltf.scene;
+            const mats = [];
+            setShadowAndCloneMaterials(root, mats, opts.userData || null);
+            fitAssetToSize(root, opts.width || 1, opts.height || 1, opts.depth || 1);
+            if (opts.yOffset) root.position.y += opts.yOffset;
+            group.add(root);
+            if (typeof opts.onReady === 'function') opts.onReady({ group, root, materials: mats });
+          });
+          return group;
+        }
+
+        // Flip right/front so visible tint matches left/back.
+        const wallRot = { back: 0, right: -90, left: 90, front: 180 };
+        // Reserve space for corner pieces so wall strips don't overlap.
+        const cornerReserve = Math.max(T, 0.14);
+        const xStart = cornerReserve;
+        const xEnd = W - cornerReserve;
+        const zStart = cornerReserve;
+        const zEnd = D - cornerReserve;
+        const runW = Math.max(0.2, xEnd - xStart);
+        const runD = Math.max(0.2, zEnd - zStart);
+
+        // --- Walls: rectangular glass shell with corner-safe strips ---
+        addFittedAsset('assets/wallWindow.glb', {
+          width: runW,
+          height: H,
+          depth: T,
+          position: { x: (xStart + xEnd) / 2, y: H / 2, z: -T / 2 },
+          rotationYDeg: wallRot.back,
+        });
+        addFittedAsset('assets/wallWindow.glb', {
+          width: runW,
+          height: H,
+          depth: T,
+          position: { x: (xStart + xEnd) / 2, y: H / 2, z: D + T / 2 },
+          rotationYDeg: wallRot.front,
+        });
+
+        // Left wall: three big glass modules constrained to the reserved run.
+        const leftThird = runD / 3;
+        const leftCenters = [
+          zStart + leftThird / 2,
+          zStart + leftThird * 1.5,
+          zStart + leftThird * 2.5,
+        ];
+        leftCenters.forEach((cz) => {
+          addFittedAsset('assets/wallWindow.glb', {
+            width: leftThird,
+            height: H,
+            depth: T,
+            position: { x: -T / 2, y: H / 2, z: cz },
+            rotationYDeg: wallRot.left,
+          });
+        });
+
+        let doorRuntime = null;
+        for (const wall of walls) {
+          if (wall.side !== 'right') continue;
+          const door = wall.openings.find(o => o.type === 'door');
+          if (!door) {
+            addFittedAsset('assets/wallWindow.glb', {
+              width: runD,
+              height: H,
+              depth: T,
+              position: { x: W + T / 2, y: H / 2, z: (zStart + zEnd) / 2 },
+              rotationYDeg: wallRot.right,
+            });
+            break;
+          }
+
+          const doorH = Math.max(1.2, Number(door.height) || 2.1);
+          const trimDnZ = door.openingTrimDown;
+          const trimUpZ = door.openingTrimUp;
+          const openY0 = 0;
+          const openH = doorH;
+          const openY1 = openY0 + openH;
+
+          const doorCenterRaw = Number.isFinite(door.centerZ) ? door.centerZ : D / 2;
+          const halfDoor = Math.max(0.15, (Number(door.width) || 1.0) / 2);
+          const doorCenterZ = Math.min(zEnd - halfDoor, Math.max(zStart + halfDoor, doorCenterRaw));
+          const gapLow = doorCenterZ - halfDoor;
+          const gapHigh = doorCenterZ + halfDoor;
+          const baseSpan = gapHigh - gapLow;
+          const minOpeningZ = 0.2;
+          let trimLo = Math.max(0, trimDnZ);
+          let trimHi = Math.max(0, trimUpZ);
+          const maxTrimSum = Math.max(0, baseSpan - minOpeningZ);
+          const sumZ = trimLo + trimHi;
+          if (sumZ > maxTrimSum && sumZ > 0) {
+            const s = maxTrimSum / sumZ;
+            trimLo *= s;
+            trimHi *= s;
+          }
+          const gapLowT = gapLow + trimLo;
+          const gapHighT = gapHigh - trimHi;
+          const gapLowC = Math.max(zStart, gapLowT);
+          const gapHighC = Math.min(zEnd, gapHighT);
+          const openingW = gapHighC - gapLowC;
+          const openingMidZ = (gapLowC + gapHighC) / 2;
+          const rx = W + T / 2;
+
+          const lowerLen = gapLowC - zStart;
+          if (lowerLen > 0.04) {
+            addFittedAsset('assets/wallWindow.glb', {
+              width: lowerLen, height: H, depth: T,
+              position: { x: rx, y: H / 2, z: zStart + lowerLen / 2 },
+              rotationYDeg: wallRot.right,
+            });
+          }
+          const upperLen = zEnd - gapHighC;
+          if (upperLen > 0.04) {
+            addFittedAsset('assets/wallWindow.glb', {
+              width: upperLen, height: H, depth: T,
+              position: { x: rx, y: H / 2, z: gapHighC + upperLen / 2 },
+              rotationYDeg: wallRot.right,
+            });
+          }
+          const lintelH = Math.max(0.05, H - openY1);
+          addFittedAsset('assets/wallWindow.glb', {
+            width: openingW, height: lintelH, depth: T,
+            position: { x: rx, y: openY1 + lintelH / 2, z: openingMidZ },
+            rotationYDeg: wallRot.right,
+          });
+
+          const hingeX = rx + door.alignOffsetX;
+          const hingeGroup = new THREE.Group();
+          hingeGroup.position.set(hingeX, openY0, gapLowC);
+          scene.add(hingeGroup);
+          const orientNode = new THREE.Group();
+          orientNode.rotation.y = -Math.PI / 2;
+          hingeGroup.add(orientNode);
+          const swingNode = new THREE.Group();
+          orientNode.add(swingNode);
+
+          const doorSensorKey = door.sensorKey || 'door_status';
+          doorRuntime = {
+            hingeGroup, swing: swingNode, panel: null, materials: [],
+            sensorKey: doorSensorKey, openAngle: door.openAngle || 90,
+          };
+
+          const leafW = Math.max(0.2, openingW - door.panelWidthMargin);
+          gltfLoader.load('assets/doorwayFront.glb', (gltf) => {
+            const panel = gltf.scene;
+            setShadowAndCloneMaterials(panel, doorRuntime.materials, { clickType: 'door', doorKey: doorSensorKey });
+            fitAssetToSize(panel, leafW, openH, 0.05);
+            swingNode.add(panel);
+            panel.updateMatrixWorld(true);
+            let panelBox = new THREE.Box3().setFromObject(panel);
+            panel.position.y += openY0 - panelBox.min.y + 0.005 + door.panelOffsetY;
+            panel.updateMatrixWorld(true);
+            panelBox = new THREE.Box3().setFromObject(panel);
+            panel.position.z += gapLowC - panelBox.min.z + door.panelOffsetZ;
+            panel.updateMatrixWorld(true);
+            panelBox = new THREE.Box3().setFromObject(panel);
+            panel.position.x += hingeX - panelBox.min.x + door.panelSnapX + door.panelOffsetX;
+
+            // Re-anchor swing pivot to the closed-door right edge in world space.
+            // This keeps closed alignment unchanged and rotates around the real hinge edge.
+            panel.updateMatrixWorld(true);
+            const closedBox = new THREE.Box3().setFromObject(panel);
+            const hingeZ =
+              Math.abs(closedBox.min.z - gapLowC) <= Math.abs(closedBox.max.z - gapLowC)
+                ? closedBox.min.z
+                : closedBox.max.z;
+            const hingePivotWorld = new THREE.Vector3(
+              closedBox.max.x,
+              closedBox.min.y,
+              hingeZ,
+            );
+            const pivotInOrient = orientNode.worldToLocal(hingePivotWorld.clone());
+            swingNode.position.copy(pivotInOrient);
+            panel.position.sub(pivotInOrient);
+            doorRuntime.panel = panel;
+          });
+          break;
+        }
+
+        const cornerInset = Math.max(0.11, T * 0.6);
+        [
+          { x: -T / 2 + cornerInset, z: -T / 2 + cornerInset, rot: 180 }, // upper-left: right + down
+          { x: W + T / 2 - cornerInset, z: -T / 2 + cornerInset, rot: 90 }, // upper-right: left + down
+          { x: -T / 2 + cornerInset, z: D + T / 2 - cornerInset, rot: -90 }, // lower-left: right + up
+          { x: W + T / 2 - cornerInset, z: D + T / 2 - cornerInset, rot: 0 }, // lower-right: left + up
+        ].forEach((c) => {
+          addFittedAsset('assets/wallCorner.glb', {
+            width: T * 2,
+            height: H,
+            depth: T * 2,
+            position: { x: c.x, y: H / 2, z: c.z },
+            rotationYDeg: c.rot,
+          });
+        });
+
+        // ── Furniture (GLB) ───────────────────────────────────────────────────
+        const chairVisuals = [];
+        const tableTargets = furniture
+          .filter(it => it.type === 'table' && it.label !== 'Sofa' && it.label !== 'Stair' && Number.isFinite(it.x) && Number.isFinite(it.z))
+          .map(it => ({ x: it.x, z: it.z }));
+        const defaultChairTarget = { x: W / 2, z: D / 2 };
+
+        function computeChairFacingYawDeg(chairPos) {
+          let target = defaultChairTarget;
+          if (tableTargets.length > 0) {
+            target = tableTargets.reduce((best, t) => {
+              const bdx = best.x - chairPos.x;
+              const bdz = best.z - chairPos.z;
+              const tdx = t.x - chairPos.x;
+              const tdz = t.z - chairPos.z;
+              return (tdx * tdx + tdz * tdz) < (bdx * bdx + bdz * bdz) ? t : best;
+            }, tableTargets[0]);
+          }
+          const eps = 0.12;
+          if (chairPos.x < target.x - eps) return 90;
+          if (chairPos.x > target.x + eps) return 270;
+          return 180;
+        }
+
+        for (const item of furniture) {
+          if (item.type === 'tv') {
+            addFittedAsset('assets/televisionModern.glb', {
+              width: item.width,
+              height: item.height,
+              depth: item.depth,
+              position: { x: item.x, y: item.y, z: item.z },
+              rotationYDeg: 0,
+            });
+            const glow = new THREE.Mesh(
+              new THREE.PlaneGeometry(Math.max(0.05, item.width - 0.2), Math.max(0.05, item.height - 0.13)),
+              new THREE.MeshStandardMaterial({ color: 0x1e293b, emissive: 0x1d4ed8, emissiveIntensity: 0.2, roughness: 0.2 }),
+            );
+            glow.position.set(item.x, item.y, item.z + item.depth / 2 + 0.04);
+            scene.add(glow);
+          } else if (item.label === 'Sofa') {
+            const yaw = item.direction ? 0 : 180;
+            addFittedAsset('assets/loungeDesignSofa.glb', {
+              width: item.width,
+              height: Math.max(item.height, 0.92),
+              depth: item.depth,
+              position: { x: item.x, y: item.y, z: item.z },
+              rotationYDeg: yaw,
+            });
+          } else if (item.label === 'Stair') {
+            addFittedAsset('assets/stairsCorner.glb', {
+              width: item.width,
+              height: Math.max(item.height * 5, 1.4),
+              depth: item.depth,
+              position: { x: item.x, y: Math.max(item.height, 0.35) * 2.2, z: item.z },
+              rotationYDeg: -90,
+            });
+          } else if (item.type === 'table') {
+            const isRound = Math.abs(item.width - item.depth) < 0.01;
+            if (isRound) {
+              addFittedAsset('assets/tableRound.glb', {
+                width: item.width + 0.28,
+                height: item.height + 0.52,
+                depth: item.depth + 0.28,
+                position: { x: item.x, y: (item.height + 0.52) / 2, z: item.z },
+                rotationYDeg: 0,
+              });
+            } else {
+              addFittedAsset('assets/table.glb', {
+                width: item.width,
+                height: item.height + 0.35,
+                depth: item.depth,
+                position: { x: item.x, y: item.y + 0.2, z: item.z },
+                rotationYDeg: 0,
+              });
+            }
+          } else if (item.type === 'chair') {
+            let px; let pz;
+            if (Number.isFinite(item.x) && Number.isFinite(item.z)) {
+              px = item.x;
+              pz = item.z;
+            } else {
+              const p = bevToXZ(item.bevX, item.bevY, W, D);
+              px = p.x;
+              pz = p.z;
+            }
+            const p = { x: px, z: pz };
+            const py = Number.isFinite(item.y) ? item.y : 0.49;
+            const chairYawDeg = computeChairFacingYawDeg(p);
+            addFittedAsset('assets/loungeChair.glb', {
+              width: 0.88,
+              height: 0.98,
+              depth: 0.88,
+              position: { x: px, y: py, z: pz },
+              rotationYDeg: chairYawDeg,
+              onReady: ({ materials }) => {
+                chairVisuals.push({ materials, activityKey: item.activityKey || '' });
+              },
+            });
+          }
+        }
+
+        // ── Sensor visuals ────────────────────────────────────────────────────
+        const sensorVisuals = [];
+        const sphereGeo = new THREE.SphereGeometry(0.09, 18, 18);
+        const motGeo    = new THREE.BoxGeometry(0.26, 0.07, 0.18);
+
+        function makeLabelSprite(text) {
+          const c = document.createElement('canvas');
+          const ctx = c.getContext('2d');
+          const pad = 12;
+          ctx.font = '600 18px system-ui,sans-serif';
+          const tw = Math.ceil(ctx.measureText(text).width) + pad * 2;
+          const th = 30;
+          c.width = tw; c.height = th;
+          ctx.font = '600 18px system-ui,sans-serif';
+          ctx.fillStyle = 'rgba(255,255,255,0.96)';
+          ctx.fillRect(0, 0, tw, th);
+          ctx.strokeStyle = 'rgba(15,23,42,0.12)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(0.5, 0.5, tw-1, th-1);
+          ctx.fillStyle = '#0f172a';
+          ctx.fillText(text, pad, 21);
+          const tex = new THREE.CanvasTexture(c);
+          tex.minFilter = THREE.LinearFilter;
+          const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+          const sprite = new THREE.Sprite(mat);
+          sprite.scale.set(tw * 0.0065, th * 0.0065, 1);
+          return sprite;
+        }
+
+        sensors.forEach((spec, idx) => {
+          const px = Math.min(W - 0.08, Math.max(0.08, spec.x));
+          const py = Math.min(H - 0.1,  Math.max(0.08, spec.y));
+          const pz = Math.min(D - 0.08, Math.max(0.08, spec.z));
+          const mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(spec.color),
+            emissive: new THREE.Color(spec.color),
+            emissiveIntensity: 0.1,
+            roughness: spec.kind === 'mot' ? 0.5 : 0.3,
+            metalness: 0.2,
+          });
+          const mesh = new THREE.Mesh(spec.kind === 'mot' ? motGeo : sphereGeo, mat);
+          mesh.position.set(px, py, pz);
+          mesh.castShadow = true;
+          mesh.userData.sensorId = spec.id;
+          mesh.userData.clickType = 'sensor';
+          scene.add(mesh);
+
+          const fake = {
+            id: spec.id,
+            dataset: {
+              kind: spec.kind, label: spec.label, bindingType: spec.bindingType,
+              sourceKey: spec.sourceKey, thresholdSourceKey: spec.thresholdSourceKey,
+              thresholdValue: spec.thresholdValue ?? '', minValue: spec.minValue ?? '',
+              maxValue: spec.maxValue ?? '', activeValues: spec.activeValues, missingPolicy: spec.missingPolicy,
+            }
+          };
+          const initResult = evaluateBinding(fake.dataset, latestAttrs);
+          const labelYOffset = 0.28 + (idx % 3) * 0.05;
+          const sprite = makeLabelSprite(formatSensorLabel(spec, initResult));
+          sprite.position.set(px, py + labelYOffset, pz);
+          sprite.userData.sensorId = spec.id;
+          sprite.userData.clickType = 'sensor';
+          scene.add(sprite);
+          sensorVisuals.push({ spec, mesh, sprite, labelYOffset, fake, result: initResult });
+        });
+
+        // ── Legend ────────────────────────────────────────────────────────────
+        const legendEl = document.getElementById('legend');
+        [
+          ['#ef4444','Dist'], ['#facc15','Light'], ['#eab308','Mot'],
+          ['#dc2626','Temp'], ['#f472b6','Ir'], ['#1e293b','TV'],
+          ['#7c6fa0','Sofa'], ['#334155','Chair'], ['#22c55e','Chair (active)'],
+          ['#818cf8','Door'], ['#2d3748','Stair'],
+        ].forEach(([hex, text]) => {
+          const span = document.createElement('span');
+          span.innerHTML = `<i style="background:${hex}"></i>${text}`;
+          legendEl.appendChild(span);
+        });
+
+        // ── HUD renderer ──────────────────────────────────────────────────────
+        function renderHud(attrs) {
+          const dl = document.getElementById('attrs');
+          dl.innerHTML = '';
+          for (const [k, v] of Object.entries(attrs).sort(([a],[b]) => a.localeCompare(b))) {
+            const dt = document.createElement('dt'); dt.textContent = k;
+            const dd = document.createElement('dd'); dd.textContent = typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(3) : String(v);
+            dl.appendChild(dt); dl.appendChild(dd);
+          }
+        }
+
+        // ── Update functions ──────────────────────────────────────────────────
+        function updateDoor(attrs) {
+          if (!doorRuntime || !doorRuntime.swing) return;
+          const val = Number(attrs[doorRuntime.sensorKey] ?? attrs.door_status ?? 0);
+          const isOpen = val > 0;
+          const rad = (Math.PI * (doorRuntime.openAngle || 90)) / 180;
+          // Living-room door should swing outward.
+          doorRuntime.swing.rotation.y = isOpen ? rad : 0;
+          if (doorRuntime.materials && doorRuntime.materials.length) {
+            doorRuntime.materials.forEach(mat => {
+              mat.emissive.setHex(isOpen ? 0x1d4ed8 : 0x000000);
+              mat.emissiveIntensity = isOpen ? 0.35 : 0.0;
+            });
+          } else if (doorRuntime.panel && doorRuntime.panel.material) {
+            doorRuntime.panel.material.emissive.setHex(isOpen ? 0x1d4ed8 : 0x000000);
+            doorRuntime.panel.material.emissiveIntensity = isOpen ? 0.35 : 0.0;
+          }
+        }
+
+        function updateChairs(attrs) {
+          chairVisuals.forEach(ch => {
+            const active = Number(attrs[ch.activityKey] ?? 0) > 0;
+            const hex = active ? 0x22c55e : 0x6b7280;
+            const intensity = active ? 0.2 : 0.04;
+            if (ch.materials && ch.materials.length) {
+              ch.materials.forEach(mat => {
+                mat.color.setHex(hex);
+                mat.emissive.setHex(hex);
+                mat.emissiveIntensity = intensity;
+              });
+            }
+          });
+        }
+
+        function updateSensors(attrs) {
+          const diag = { totalSensors: sensorVisuals.length, missingKeys: new Set(), invalidIds: [] };
+          sensorVisuals.forEach(v => {
+            const result = evaluateBinding(v.fake.dataset, attrs);
+            v.result = result;
+            if (result.missingKey) diag.missingKeys.add(result.missingKey);
+            if (result.invalid) diag.invalidIds.push(v.spec.id);
+            v.mesh.visible = !!result.visible;
+            v.sprite.visible = !!result.visible;
+            const intensity = result.status === 'unknown' ? 0.04 : (result.active ? (v.spec.kind === 'mot' ? 0.32 : 0.5) : (v.spec.kind === 'mot' ? 0.06 : 0.08));
+            v.mesh.material.emissiveIntensity = intensity;
+            // Rebuild sprite label
+            const next = makeLabelSprite(formatSensorLabel(v.spec, result));
+            next.position.copy(v.sprite.position);
+            next.userData.sensorId = v.spec.id;
+            next.userData.clickType = 'sensor';
+            scene.add(next);
+            scene.remove(v.sprite);
+            if (v.sprite.material.map) v.sprite.material.map.dispose();
+            v.sprite.material.dispose();
+            v.sprite = next;
+          });
+          renderBindingStatus(diag);
+        }
+
+        function refreshPanel() {
+          if (!selectedPanel) return;
+          if (selectedPanel.type === 'sensor') {
+            const vis = sensorVisuals.find(v => v.spec.id === selectedPanel.sensorId);
+            if (!vis) return;
+            const spec = vis.spec;
+            showSensorDetails(spec.label || spec.id, `${spec.kind} • ${vis.result.status || 'unknown'}`, [
+              ['id', spec.id], ['kind', spec.kind], ['bindingType', spec.bindingType],
+              ['sourceKey', spec.sourceKey], ['sourceValue', vis.result.value],
+              ['status', vis.result.status], ['active', vis.result.active ? 'yes' : 'no'],
+              ['thresholdKey', spec.thresholdSourceKey || ''], ['thresholdValue', vis.result.thresholdValue ?? spec.thresholdValue ?? ''],
+              ['range', `${spec.minValue ?? '—'} .. ${spec.maxValue ?? '—'}`],
+              ['missingPolicy', spec.missingPolicy],
+            ]);
+          }
+          if (selectedPanel.type === 'door' && doorRuntime) {
+            const key = doorRuntime.sensorKey || 'door_status';
+            const val = Number(latestAttrs[key] ?? latestAttrs.door_status ?? 0);
+            const isOpen = val > 0;
+            showSensorDetails('Door', `door • ${isOpen ? 'open' : 'closed'}`, [
+              ['sourceKey', key], ['sourceValue', latestAttrs[key]],
+              ['status', isOpen ? 'open' : 'closed'], ['active', isOpen ? 'yes' : 'no'],
+            ]);
+          }
+        }
+
+        // ── Click handler ─────────────────────────────────────────────────────
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        renderer.domElement.addEventListener('click', evt => {
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, camera);
+
+          const clickable = [];
+          sensorVisuals.forEach(v => { clickable.push(v.mesh); clickable.push(v.sprite); });
+          if (doorRuntime && doorRuntime.panel) clickable.push(doorRuntime.panel);
+
+          const hits = raycaster.intersectObjects(clickable, true);
+          if (!hits.length) return;
+          const obj = hits[0].object;
+          const clickType = obj.userData.clickType;
+
+          sensorVisuals.forEach(v => v.mesh.scale.setScalar(1.0));
+          selectedVisual = null;
+
+          if (clickType === 'sensor') {
+            const sensorId = obj.userData.sensorId;
+            const vis = sensorVisuals.find(v => v.spec.id === sensorId);
+            if (!vis) return;
+            selectedVisual = vis;
+            vis.mesh.scale.setScalar(1.3);
+            selectedPanel = { type: 'sensor', sensorId };
+            refreshPanel();
+            return;
+          }
+          if (clickType === 'door' && doorRuntime) {
+            selectedPanel = { type: 'door', doorKey: doorRuntime.sensorKey || 'door_status' };
+            refreshPanel();
+          }
+        });
+
+        clearBtn.addEventListener('click', () => {
+          selectedVisual = null;
+          selectedPanel = null;
+          sensorVisuals.forEach(v => v.mesh.scale.setScalar(1.0));
+          panelTitle.textContent = 'LLM Caption';
+          panelSubtitle.textContent = 'Latest 30-second summary';
+          detailEl.style.display = 'none';
+          panelCaption.style.display = '';
+          panelCaption.textContent = latestCaption || 'Waiting for caption...';
+        });
+
+        // ── Initial render from samplePayload ─────────────────────────────────
+        let flat = config.samplePayload ? flattenPayload(config.samplePayload) : {};
+        latestAttrs = flat;
+        latestPayload = config.samplePayload || {};
+        latestPayloadByAgent = {};
+        renderHud(flat);
+        updateSensors(flat);
+        updateDoor(flat);
+        updateChairs(flat);
+        document.getElementById('panel-metrics').textContent = `Rendered sensors: ${sensorVisuals.length} / ${totalXmlSensors}`;
+
+        // ── Polling ───────────────────────────────────────────────────────────
+        async function poll() {
+          try {
+            const res = await fetch(config.stream.endpoint, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const incoming = data?.flattened;
+            if (incoming && typeof incoming === 'object') {
+              flat = incoming;
+              latestAttrs = flat;
+              latestPayload = data?.payload || {};
+              latestPayloadByAgent = (data?.payload_by_agent && typeof data.payload_by_agent === 'object')
+                ? data.payload_by_agent
+                : {};
+              renderHud(flat);
+              updateSensors(flat);
+              updateDoor(flat);
+              updateChairs(flat);
+              if (selectedPanel) refreshPanel();
+            }
+            // Caption
+            const caption = extractCaptionText(data, roomId);
+            if (caption) { latestCaption = caption; if (!selectedPanel) panelCaption.textContent = caption; }
+            const ts = data?.timestamp || '';
+            if (ts && ts !== lastTimestamp) {
+              lastTimestamp = ts;
+              statusEl.textContent = `Stream: live (agent=${data.agent_id || 'unknown'}, ts=${ts})`;
+              failedCount = 0;
+            } else if (!lastTimestamp) {
+              statusEl.textContent = 'Stream: waiting for first payload…';
+            }
+            void refreshControlUi();
+          } catch(err) {
+            failedCount++;
+            if (failedCount >= 2) statusEl.textContent = 'Stream: offline (sample payload)';
+          }
+        }
+
+        setInterval(poll, config.stream.pollIntervalMs);
+        poll();
+
+        // ── Resize ───────────────────────────────────────────────────────────
+        window.addEventListener('resize', () => {
+          camera.aspect = sceneContainer.clientWidth / sceneContainer.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(sceneContainer.clientWidth, sceneContainer.clientHeight);
+        });
+
+        // ── Render loop ───────────────────────────────────────────────────────
+        const camQ = new THREE.Quaternion();
+        function tick() {
+          requestAnimationFrame(tick);
+          if (controls.update) controls.update();
+          camQ.copy(camera.quaternion);
+          sensorVisuals.forEach(v => { if (v.sprite) v.sprite.quaternion.copy(camQ); });
+          renderer.render(scene, camera);
+        }
+        tick();
+        loadingEl.style.display = 'none';
+
+      } catch(err) {
+        loadingEl.textContent = `Error: ${err.message}`;
+        console.error(err);
+      }
+    }
+
+    // Wait for Three.js ESM module to finish loading before starting
+    if (window._threeReady) {
+      main();
+    } else {
+      document.addEventListener('three-ready', main, { once: true });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<smart-room name="Living Room" description="Multi-zone lounge with stair and sensor array">
+
+  <room width="7.0" depth="11.0" wallHeight="2.7" wallThickness="0.15"/>
+
+  <walls>
+    <!-- Back wall (top of floor plan, z=0) -->
+    <wall id="wall-back" side="back"/>
+
+    <!-- Right wall (x = room width): entrance door along +Z -->
+    <wall id="wall-right" side="right">
+      <!-- openingTrimDown / openingTrimUp (m): trim the hole along world Z (low-Z / high-Z sides). -->
+      <!-- alignOffsetX, panelSnapX, panelOffsetX/Y/Z (m): direct door-leaf fit offsets after auto-fit. -->
+      <door id="door-1" centerZ="8.2" width="1.2" height="2.0"
+            sensorKey="door_status" openAngle="90"
+            alignOffsetX="0.65" panelSnapX="-0.025" panelWidthMargin="0"
+            panelOffsetX="0" panelOffsetY="0" panelOffsetZ="0"
+            openingTrimDown="0" openingTrimUp="0"/>
+    </wall>
+
+    <!-- Left wall: full-height glass via wallWindow.glb in viewer (no cutout) -->
+    <wall id="wall-left" side="left"/>
+
+    <!-- Front wall (bottom of floor plan): solid -->
+    <wall id="wall-front" side="front"/>
+  </walls>
+
+  <furniture>
+    <!-- TV on back wall, centered -->
+    <item id="tv-1" type="tv" label="TV"
+          x="3.5" y="1.35" z="0.2"
+          width="2.4" height="1.0" depth="0.12"
+          color="#1e293b"/>
+
+    <!-- Upper seating: chairs align with sofa x-extent (sofa half-width 1.6); table centered on sofa x -->
+    <item id="chair-ul" type="chair" label="Chair UL"
+          x="3.04" y="0.49" z="1.4"
+          activityKey="chair_ul_occupied"/>
+    <item id="chair-ur" type="chair" label="Chair UR"
+          x="5.36" y="0.49" z="1.4"
+          activityKey="chair_ur_occupied"/>
+    <item id="table-upper" type="table" label="Table Upper"
+          x="4.2" y="0.76" z="1.4"
+          width="1.0" height="0.06" depth="1.0"
+          color="#c8a97e" legColor="#5c3d1e"/>
+
+    <!-- Sofa in the middle -->
+    <item id="sofa-2" type="table" label="Sofa"
+          x="4.2" y="0.55" z="3.2"
+          width="3.2" height="0.5" depth="1.4"
+          color="#7c6fa0" legColor="#4a3f62"/>
+    <item id="sofa-1" type="table" label="Sofa"
+          x="4.2" y="0.55" z="5.2"
+          width="3.2" height="0.5" depth="1.4" direction="1.0"
+          color="#7c6fa0" legColor="#4a3f62"/>
+
+    <!-- Lower seating: same x-alignment as sofas; table on sofa center x and row z -->
+    <item id="chair-ll" type="chair" label="Chair LL"
+          x="3.04" y="0.49" z="6.9"
+          activityKey="chair_ll_occupied"/>
+    <item id="chair-lr" type="chair" label="Chair LR"
+          x="5.36" y="0.49" z="6.9"
+          activityKey="chair_lr_occupied"/>
+    <item id="table-lower" type="table" label="Table Lower"
+          x="4.2" y="0.76" z="6.9"
+          width="1.0" height="0.06" depth="1.0"
+          color="#c8a97e" legColor="#5c3d1e"/>
+
+    <!-- Stair block, bottom-left -->
+    <item id="stair-1" type="table" label="Stair"
+          x="1.4" y="0.3" z="8.6"
+          width="4.0" height="0.3" depth="2.0"
+          color="#b0bec5" legColor="#78909c"/>
+  </furniture>
+
+  <sensors>
+    <!-- ── Light sensor: top-left corner ── -->
+    <sensor id="light-1" kind="lux" label="Light"
+            bindingType="threshold_gt"
+            sourceKey="light_1"
+            thresholdValue="200"
+            missingPolicy="unknown"
+            x="0.35" y="2.55" z="0.35"
+            color="#facc15"/>
+
+    <!-- ── Temp sensor: top-right corner ── -->
+    <sensor id="temp-1" kind="tmp" label="Temp"
+            bindingType="threshold_gt"
+            sourceKey="temperature_1"
+            thresholdValue="28"
+            missingPolicy="unknown"
+            x="8.65" y="2.55" z="0.35"
+            color="#dc2626"/>
+
+    <!-- ── Left wall sensors (top to bottom) ── -->
+    <!-- Mot-1 (upper-left wall) -->
+    <sensor id="mot-left-1" kind="mot" label="Mot L1"
+            bindingType="binary"
+            sourceKey="motion_status"
+            activeValues="1,on,true,motion"
+            missingPolicy="inactive"
+            x="0.1" y="1.9" z="1.6"
+            color="#eab308"/>
+
+    <!-- Dist-1 (upper-left wall) -->
+    <sensor id="dist-left-1" kind="dst" label="Dist L1"
+            bindingType="threshold_lt"
+            sourceKey="distance_1_cm"
+            thresholdSourceKey="distance_1_threshold_cm"
+            thresholdValue="80"
+            missingPolicy="unknown"
+            x="-0.05" y="1.3" z="2.8"
+            color="#ef4444"/>
+
+    <!-- Mot-2 (mid-left wall, near window) -->
+    <sensor id="mot-left-2" kind="mot" label="Mot L2"
+            bindingType="binary"
+            sourceKey="motion_status"
+            activeValues="1,on,true,motion"
+            missingPolicy="inactive"
+            x="0.1" y="1.9" z="4.8"
+            color="#eab308"/>
+
+    <!-- Dist-2 (lower-mid-left wall) -->
+    <sensor id="dist-left-2" kind="dst" label="Dist L2"
+            bindingType="threshold_lt"
+            sourceKey="distance_2_cm"
+            thresholdSourceKey="distance_2_threshold_cm"
+            thresholdValue="80"
+            missingPolicy="unknown"
+            x="-0.05" y="1.3" z="7.0"
+            color="#ef4444"/>
+
+    <!-- Mot-3 (lower-left wall) -->
+    <sensor id="mot-left-3" kind="mot" label="Mot L3"
+            bindingType="binary"
+            sourceKey="motion_status"
+            activeValues="1,on,true,motion"
+            missingPolicy="inactive"
+            x="0.1" y="1.9" z="8.6"
+            color="#eab308"/>
+
+    <!-- ── Right wall sensors (top to bottom) ── -->
+    <!-- Mot-4 (upper-right wall) -->
+    <sensor id="mot-right-1" kind="mot" label="Mot R1"
+            bindingType="binary"
+            sourceKey="motion_status"
+            activeValues="1,on,true,motion"
+            missingPolicy="inactive"
+            x="8.9" y="1.9" z="1.5"
+            color="#eab308"/>
+
+    <!-- Ir-1 (upper-right wall) -->
+    <sensor id="ir-right-1" kind="ir" label="Ir"
+            bindingType="threshold_lt"
+            sourceKey="infrared_1_cm"
+            thresholdSourceKey="infrared_1_threshold_cm"
+            missingPolicy="unknown"
+            x="9.05" y="1.3" z="3.0"
+            color="#f472b6"/>
+
+    <!-- Mot-5 (mid-right wall) -->
+    <sensor id="mot-right-2" kind="mot" label="Mot R2"
+            bindingType="binary"
+            sourceKey="motion_status"
+            activeValues="1,on,true,motion"
+            missingPolicy="inactive"
+            x="8.9" y="1.9" z="5.5"
+            color="#eab308"/>
+
+    <!-- Ir-2 (lower-mid-right wall) -->
+    <sensor id="ir-right-2" kind="ir" label="Ir"
+            bindingType="threshold_lt"
+            sourceKey="infrared_2_cm"
+            thresholdSourceKey="infrared_2_threshold_cm"
+            missingPolicy="unknown"
+            x="9.05" y="1.3" z="7.0"
+            color="#f472b6"/>
+
+    <!-- Mot-6 (lower-right wall) -->
+    <sensor id="mot-right-3" kind="mot" label="Mot R3"
+            bindingType="binary"
+            sourceKey="motion_status"
+            activeValues="1,on,true,motion"
+            missingPolicy="inactive"
+            x="8.9" y="1.9" z="8.6"
+            color="#eab308"/>
+  </sensors>
+
+  <stream endpoint="/api/latest" pollIntervalMs="1000"/>
+
+  <samplePayload>
+{
+  "state": {
+    "door_status": "closed",
+    "light_status": "on",
+    "motion_status": "no_motion",
+    "activity_detected": false
+  },
+  "sensors": {
+    "light_1": { "value": "180", "unit": "lux", "metadata": {} },
+    "temperature_1": { "value": "24.5", "unit": "C", "metadata": {} },
+    "motion_left_1":  { "value": "0", "unit": "", "metadata": {} },
+    "motion_left_2":  { "value": "1", "unit": "", "metadata": {} },
+    "motion_left_3":  { "value": "0", "unit": "", "metadata": {} },
+    "motion_right_1": { "value": "0", "unit": "", "metadata": {} },
+    "motion_right_2": { "value": "1", "unit": "", "metadata": {} },
+    "motion_right_3": { "value": "0", "unit": "", "metadata": {} },
+    "distance_left_1": { "value": "55",  "unit": "cm", "metadata": { "threshold_cm": "80" } },
+    "distance_left_2": { "value": "120", "unit": "cm", "metadata": { "threshold_cm": "80" } },
+    "infrared_right_1": { "value": "0", "unit": "", "metadata": {} },
+    "infrared_right_2": { "value": "1", "unit": "", "metadata": {} },
+    "chair_ul_occupied": { "value": "1", "unit": "", "metadata": {} },
+    "chair_ur_occupied": { "value": "0", "unit": "", "metadata": {} },
+    "chair_ll_occupied": { "value": "0", "unit": "", "metadata": {} },
+    "chair_lr_occupied": { "value": "1", "unit": "", "metadata": {} }
+  }
+}
+  </samplePayload>
+
+</smart-room>

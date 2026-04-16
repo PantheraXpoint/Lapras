@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAPRAS++ Smart Home — Room Overview</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f0f4f8;
+      color: #1e293b;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 20px 40px;
+      border-bottom: 1px solid rgba(15,23,42,0.08);
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .logo-mark {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; color: #fff; letter-spacing: -1px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      letter-spacing: -0.3px;
+    }
+
+    header p {
+      margin: 0;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    /* ── Main grid ── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 20px;
+    }
+
+    .rooms-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+      gap: 24px;
+    }
+
+    /* ── Room card ── */
+    .room-card {
+      background: #ffffff;
+      border: 1px solid rgba(15,23,42,0.1);
+      border-radius: 16px;
+      overflow: hidden;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+      box-shadow: 0 2px 12px rgba(15,23,42,0.08);
+    }
+
+    .room-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 36px rgba(15,23,42,0.14);
+      border-color: rgba(14,165,233,0.4);
+    }
+
+    .room-card:active {
+      transform: translateY(-1px);
+    }
+
+    /* Canvas preview area */
+    .preview-wrap {
+      position: relative;
+      background: #e8f0fa;
+      height: 300px;
+      overflow: hidden;
+    }
+
+    .preview-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .preview-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid rgba(15,23,42,0.1);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #475569;
+      backdrop-filter: blur(4px);
+    }
+
+    .preview-dims {
+      position: absolute;
+      bottom: 10px;
+      left: 12px;
+      font-size: 10px;
+      color: #64748b;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Card body */
+    .card-body {
+      padding: 20px 22px 22px;
+    }
+
+    .card-title {
+      margin: 0 0 4px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      letter-spacing: -0.3px;
+    }
+
+    .card-desc {
+      margin: 0 0 16px;
+      font-size: 13px;
+      color: #64748b;
+      line-height: 1.45;
+    }
+
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .meta-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #f1f5f9;
+      border: 1px solid rgba(15,23,42,0.08);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      color: #475569;
+    }
+
+    .meta-chip .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .card-arrow {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #0ea5e9;
+      padding-top: 14px;
+      opacity: 0;
+      transition: opacity 0.18s;
+    }
+
+    .room-card:hover .card-arrow { opacity: 1; }
+
+    /* Legend dots */
+    .legend-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(15,23,42,0.07);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: #64748b;
+    }
+
+    .legend-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 11px;
+      color: #94a3b8;
+      border-top: 1px solid rgba(15,23,42,0.07);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">L++</div>
+  <div>
+    <h1>LAPRAS++ Smart Home</h1>
+    <p>Select a room to open its 3D sensor visualization</p>
+  </div>
+</header>
+
+<main>
+  <div class="section-label">Available Rooms</div>
+
+  <div class="rooms-grid">
+
+    <!-- ── Card 1: N1 Lab Room ── -->
+    <a class="room-card" href="visualize_smart_room_aframe.html" id="card-n1">
+      <div class="preview-wrap">
+        <canvas id="canvas-n1" width="880" height="600"></canvas>
+        <span class="preview-badge">A-Frame 3D</span>
+        <span class="preview-dims">5.0 m × 6.0 m · h 2.8 m</span>
+      </div>
+      <div class="card-body">
+        <h2 class="card-title">N1 Lab Room</h2>
+        <p class="card-desc">KAIST N1 Smart Space Lab — meeting room with multi-sensor coverage and occupancy tracking per seat.</p>
+        <div class="card-meta">
+          <span class="meta-chip"><span class="dot" style="background:#ef4444"></span>4 Distance</span>
+          <span class="meta-chip"><span class="dot" style="background:#f472b6"></span>4 Infrared</span>
+          <span class="meta-chip"><span class="dot" style="background:#eab308"></span>10 Motion</span>
+          <span class="meta-chip"><span class="dot" style="background:#facc15"></span>1 Light</span>
+          <span class="meta-chip"><span class="dot" style="background:#dc2626"></span>1 Temp</span>
+        </div>
+        <div class="legend-row">
+          <span class="legend-item"><span class="legend-dot" style="background:#8b6b4a"></span>Meeting Table</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#14b8a6"></span>2× AC Unit</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#2d3748"></span>TV</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#6366f1"></span>12 Chairs</span>
+        </div>
+        <div class="card-arrow">Open visualization →</div>
+      </div>
+    </a>
+
+    <!-- ── Card 2: Living Room ── -->
+    <a class="room-card" href="new_room_layout.html" id="card-lr">
+      <div class="preview-wrap">
+        <canvas id="canvas-lr" width="700" height="1100"></canvas>
+        <span class="preview-badge">Three.js 3D</span>
+        <span class="preview-dims">7.0 m × 11.0 m · h 2.7 m</span>
+      </div>
+      <div class="card-body">
+        <h2 class="card-title">Living Room</h2>
+        <p class="card-desc">Multi-zone lounge with upper seating, sofas, lower lounge, and staircase — full perimeter sensor array.</p>
+        <div class="card-meta">
+          <span class="meta-chip"><span class="dot" style="background:#ef4444"></span>2 Distance</span>
+          <span class="meta-chip"><span class="dot" style="background:#f472b6"></span>2 Infrared</span>
+          <span class="meta-chip"><span class="dot" style="background:#eab308"></span>6 Motion</span>
+          <span class="meta-chip"><span class="dot" style="background:#facc15"></span>1 Light</span>
+          <span class="meta-chip"><span class="dot" style="background:#dc2626"></span>1 Temp</span>
+        </div>
+        <div class="legend-row">
+          <span class="legend-item"><span class="legend-dot" style="background:#7c6fa0"></span>2× Sofa</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#c8a97e"></span>2× Table</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#1e293b"></span>TV</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#b0bec5"></span>Staircase</span>
+        </div>
+        <div class="card-arrow">Open visualization →</div>
+      </div>
+    </a>
+
+  </div>
+</main>
+
+<footer>LAPRAS++ Smart Space System — KAIST</footer>
+
+<script>
+// ─────────────────────────────────────────────
+//  Floor plan renderer
+// ─────────────────────────────────────────────
+
+function renderFloorPlan(canvasId, room, furniture, sensors, doors, windows) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const PAD = Math.min(W, H) * 0.1;
+  const scaleX = (W - PAD * 2) / room.width;
+  const scaleZ = (H - PAD * 2) / room.depth;
+  const scale  = Math.min(scaleX, scaleZ);
+
+  // Centre the plan
+  const offX = (W - room.width * scale) / 2;
+  const offZ = (H - room.depth * scale) / 2;
+
+  function tx(x) { return offX + x * scale; }
+  function tz(z) { return offZ + z * scale; }
+  function ts(v) { return v * scale; }
+
+  // ── Background ──
+  ctx.fillStyle = '#e8f0fa';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Floor ──
+  ctx.fillStyle = '#f8faff';
+  ctx.beginPath();
+  ctx.roundRect(tx(0), tz(0), ts(room.width), ts(room.depth), 4);
+  ctx.fill();
+
+  // ── Floor grid (subtle) ──
+  ctx.strokeStyle = 'rgba(15,23,42,0.05)';
+  ctx.lineWidth = 1;
+  const gridStep = 1.0; // 1 metre grid
+  for (let x = 0; x <= room.width; x += gridStep) {
+    ctx.beginPath(); ctx.moveTo(tx(x), tz(0)); ctx.lineTo(tx(x), tz(room.depth)); ctx.stroke();
+  }
+  for (let z = 0; z <= room.depth; z += gridStep) {
+    ctx.beginPath(); ctx.moveTo(tx(0), tz(z)); ctx.lineTo(tx(room.width), tz(z)); ctx.stroke();
+  }
+
+  // ── Walls ──
+  const wt = room.wallThickness || 0.13;
+  const wallColor = '#94a3b8';
+  const wallEdge  = '#64748b';
+
+  function drawWallSegment(x1, z1, x2, z2, skipZones) {
+    // Draw a wall from (x1,z1) to (x2,z2) as a thick line
+    ctx.strokeStyle = wallColor;
+    ctx.lineWidth = Math.max(ts(wt), 5);
+    ctx.lineCap = 'square';
+    ctx.beginPath();
+    ctx.moveTo(tx(x1), tz(z1));
+    ctx.lineTo(tx(x2), tz(z2));
+    ctx.stroke();
+  }
+
+  // Back wall
+  drawWallSegment(0, 0, room.width, 0);
+  // Left wall
+  drawWallSegment(0, 0, 0, room.depth);
+  // Right wall
+  drawWallSegment(room.width, 0, room.width, room.depth);
+  // Front wall
+  drawWallSegment(0, room.depth, room.width, room.depth);
+
+  // ── Windows (cut-through in blue) ──
+  if (windows) {
+    windows.forEach(win => {
+      ctx.strokeStyle = '#0ea5e9';
+      ctx.lineWidth = Math.max(ts(wt) + 2, 6);
+      ctx.lineCap = 'butt';
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      if (win.side === 'left') {
+        const z0 = win.centerZ - win.width / 2;
+        const z1 = win.centerZ + win.width / 2;
+        ctx.moveTo(tx(0), tz(Math.max(0, z0)));
+        ctx.lineTo(tx(0), tz(Math.min(room.depth, z1)));
+      } else if (win.side === 'right') {
+        const z0 = win.centerZ - win.width / 2;
+        const z1 = win.centerZ + win.width / 2;
+        ctx.moveTo(tx(room.width), tz(Math.max(0, z0)));
+        ctx.lineTo(tx(room.width), tz(Math.min(room.depth, z1)));
+      } else if (win.side === 'back') {
+        const x0 = win.centerX - win.width / 2;
+        const x1 = win.centerX + win.width / 2;
+        ctx.moveTo(tx(Math.max(0, x0)), tz(0));
+        ctx.lineTo(tx(Math.min(room.width, x1)), tz(0));
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // ── Doors (arc indicator) ──
+  if (doors) {
+    doors.forEach(door => {
+      const cx = door.centerX !== undefined ? door.centerX : 0;
+      const cz = door.centerZ !== undefined ? door.centerZ : room.depth;
+      const dw = door.width;
+
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+
+      if (door.side === 'front') {
+        // Opening gap on front wall
+        ctx.strokeStyle = '#f8faff';
+        ctx.lineWidth = Math.max(ts(wt) + 2, 6);
+        ctx.lineCap = 'butt';
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(tx(cx - dw / 2), tz(room.depth));
+        ctx.lineTo(tx(cx + dw / 2), tz(room.depth));
+        ctx.stroke();
+
+        // Arc
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(tx(cx - dw / 2), tz(room.depth), ts(dw), -Math.PI / 2, 0);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    });
+  }
+
+  // ── Furniture ──
+  furniture.forEach(item => {
+    if (!item.x && !item.bevX) return;
+
+    ctx.save();
+    if (item.x !== undefined) {
+      const fw = item.width  || 0.5;
+      const fd = item.depth  || 0.5;
+      const fh = item.height || 0.4;
+
+      const px = tx(item.x - fw / 2);
+      const pz = tz(item.z - fd / 2);
+      const pw = ts(fw);
+      const pd = ts(fd);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(15,23,42,0.1)';
+      ctx.fillRect(px + 3, pz + 3, pw, pd);
+
+      ctx.fillStyle = item.color || '#94a3b8';
+      ctx.beginPath();
+      ctx.roundRect(px, pz, pw, pd, 3);
+      ctx.fill();
+
+      // Shine highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillRect(px + 2, pz + 2, pw - 4, Math.min(pd * 0.3, 8));
+
+      if (item.label && ts(fw) > 30) {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = `${Math.max(9, Math.min(12, ts(fw) * 0.18))}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.label, px + pw / 2, pz + pd / 2);
+      }
+    }
+    ctx.restore();
+  });
+
+  // ── Sensors ──
+  sensors.forEach(sensor => {
+    const sx = tx(sensor.x);
+    const sz = tz(sensor.z);
+    const r = Math.max(ts(0.06), 5);
+
+    // Glow
+    const grad = ctx.createRadialGradient(sx, sz, 0, sx, sz, r * 2.5);
+    grad.addColorStop(0, sensor.color + 'aa');
+    grad.addColorStop(1, sensor.color + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sx, sz, r * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dot
+    ctx.fillStyle = sensor.color;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(sx, sz, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  // ── Wall outline on top ──
+  ctx.strokeStyle = wallEdge;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([]);
+  ctx.strokeRect(tx(0), tz(0), ts(room.width), ts(room.depth));
+}
+
+
+// ─────────────────────────────────────────────
+//  Room 1: N1 Lab (smart_room.xml)
+// ─────────────────────────────────────────────
+
+const n1Room = { width: 5.0, depth: 6.0, wallHeight: 2.8, wallThickness: 0.12 };
+
+const n1Furniture = [
+  { x: 2.5, z: 0.18, width: 1.85, height: 1.05, depth: 0.07, color: '#2d3748', label: 'TV' },
+  { x: 2.5, z: 1.68, width: 0.75, height: 0.22, depth: 0.55, color: '#14b8a6', label: 'AC 1' },
+  { x: 2.5, z: 3.48, width: 0.75, height: 0.22, depth: 0.55, color: '#14b8a6', label: 'AC 2' },
+  { x: 2.4, z: 2.7,  width: 1.5,  height: 0.08, depth: 3.0,  color: '#8b6b4a', label: 'Meeting Table' },
+];
+
+// 12 chairs in BEV% coords — map to room metres
+const n1ChairsBev = [
+  [25,25],[25,35],[25,45],[25,55],[25,65],
+  [70,18],[70,28],[70,38],[70,48],[70,58],[70,68],
+  [50,75]
+];
+n1ChairsBev.forEach(([bx,bz]) => {
+  n1Furniture.push({
+    x: bx / 100 * n1Room.width,
+    z: bz / 100 * n1Room.depth,
+    width: 0.45, height: 0.05, depth: 0.45,
+    color: '#cbd5e1',
+  });
+});
+
+const n1Sensors = [
+  { x: 0.18, z: 1.50, color: '#ef4444' },
+  { x: 0.18, z: 2.10, color: '#ef4444' },
+  { x: 0.18, z: 3.30, color: '#ef4444' },
+  { x: 0.18, z: 3.90, color: '#ef4444' },
+  { x: 0.18, z: 2.70, color: '#facc15' },
+  { x: 4.0,  z: 0.23, color: '#dc2626' },
+  { x: 4.82, z: 1.68, color: '#f472b6' },
+  { x: 4.82, z: 2.28, color: '#f472b6' },
+  { x: 4.82, z: 3.48, color: '#f472b6' },
+  { x: 4.82, z: 4.08, color: '#f472b6' },
+  { x: 4.82, z: 0.42, color: '#eab308' },
+  { x: 0.18, z: 1.50, color: '#eab308' },
+  { x: 0.18, z: 2.70, color: '#eab308' },
+  { x: 0.18, z: 3.90, color: '#eab308' },
+  { x: 3.90, z: 1.68, color: '#eab308' },
+  { x: 3.90, z: 2.88, color: '#eab308' },
+  { x: 3.90, z: 4.08, color: '#eab308' },
+  { x: 0.18, z: 5.70, color: '#eab308' },
+  { x: 1.25, z: 5.82, color: '#eab308' },
+  { x: 3.25, z: 5.82, color: '#eab308' },
+];
+
+const n1Doors = [{ side: 'front', centerX: 4.5, width: 0.85 }];
+const n1Windows = [{ side: 'left', centerZ: 2.7, width: 0.96 }];
+
+renderFloorPlan('canvas-n1', n1Room, n1Furniture, n1Sensors, n1Doors, n1Windows);
+
+
+// ─────────────────────────────────────────────
+//  Room 2: Living Room (new_smart_room.xml)
+// ─────────────────────────────────────────────
+
+const lrRoom = { width: 7.0, depth: 11.0, wallHeight: 2.7, wallThickness: 0.15 };
+
+const lrFurniture = [
+  { x: 3.5, z: 0.2,  width: 2.4,  height: 1.0,  depth: 0.12, color: '#1e293b',  label: 'TV' },
+  { x: 2.4, z: 2.4,  width: 1.0,  height: 0.06, depth: 1.0,  color: '#c8a97e',  label: 'Table' },
+  { x: 3.0, z: 3.8,  width: 3.2,  height: 0.5,  depth: 1.4,  color: '#7c6fa0',  label: 'Sofa' },
+  { x: 3.0, z: 5.8,  width: 3.2,  height: 0.5,  depth: 1.4,  color: '#7c6fa0',  label: 'Sofa' },
+  { x: 2.5, z: 7.5,  width: 1.0,  height: 0.06, depth: 1.0,  color: '#c8a97e',  label: 'Table' },
+  { x: 2.2, z: 9.8,  width: 4.0,  height: 0.3,  depth: 2.0,  color: '#b0bec5',  label: 'Stair' },
+];
+
+// Chairs BEV%
+const lrChairsBev = [[22,22],[52,22],[22,67],[47,67]];
+lrChairsBev.forEach(([bx,bz]) => {
+  lrFurniture.push({
+    x: bx / 100 * lrRoom.width,
+    z: bz / 100 * lrRoom.depth,
+    width: 0.55, height: 0.05, depth: 0.55,
+    color: '#cbd5e1',
+  });
+});
+
+const lrSensors = [
+  { x: 0.35,  z: 0.35, color: '#facc15' },
+  { x: 6.65,  z: 0.35, color: '#dc2626' },
+  { x: 0.1,   z: 1.6,  color: '#eab308' },
+  { x: -0.05, z: 2.8,  color: '#ef4444' },
+  { x: 0.1,   z: 4.8,  color: '#eab308' },
+  { x: -0.05, z: 7.0,  color: '#ef4444' },
+  { x: 0.1,   z: 8.6,  color: '#eab308' },
+  { x: 6.9,   z: 1.5,  color: '#eab308' },
+  { x: 7.05,  z: 3.0,  color: '#f472b6' },
+  { x: 6.9,   z: 5.5,  color: '#eab308' },
+  { x: 7.05,  z: 7.0,  color: '#f472b6' },
+  { x: 6.9,   z: 8.6,  color: '#eab308' },
+];
+
+const lrDoors = [{ side: 'front', centerX: 6.3, width: 1.1 }];
+const lrWindows = [
+  { side: 'left',  centerZ: 5.5, width: 9.0 },
+  { side: 'right', centerZ: 5.5, width: 9.0 },
+];
+
+renderFloorPlan('canvas-lr', lrRoom, lrFurniture, lrSensors, lrDoors, lrWindows);
+</script>
+
+</body>
+</html>
