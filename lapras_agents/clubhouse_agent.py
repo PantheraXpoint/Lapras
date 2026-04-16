@@ -1007,56 +1007,80 @@ class ClubHouseAgent(VirtualAgent):
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
         
         try:
-            if action_payload.actionName == "turn_on":
-                # Turn on both lights and aircon
-                light_result = self.__turn_on_lights()
-                aircon_result = self.__turn_on_aircon()
-                
-                # Combine results
-                overall_success = light_result["success"] and aircon_result["success"]
-                combined_message = f"Lights: {light_result['message']}; Aircon: {aircon_result['message']}"
-                
-                new_state = {
-                    "power": "on" if overall_success else "partial",
-                    "light_power": light_result.get("new_state", {}).get("light_power", "unknown"),
-                    "aircon_power": aircon_result.get("new_state", {}).get("aircon_power", "unknown")
-                }
-                
+            if action_payload.actionName in {"turn_on", "turn_off"}:
+                # Manual UI sends explicit per-subsystem targets.
+                # For backward compatibility and rule-driven automation paths,
+                # missing target falls back to combined behavior ("both").
+                params = action_payload.parameters if isinstance(action_payload.parameters, dict) else {}
+                target = str(params.get("target", "both")).strip().lower()
+                if target not in {"light", "aircon", "both"}:
+                    return {
+                        "success": False,
+                        "message": "Invalid parameters.target (expected 'light' or 'aircon')",
+                        "new_state": {},
+                    }
+
+                turning_on = action_payload.actionName == "turn_on"
+                if target == "both":
+                    light_result = self.__turn_on_lights() if turning_on else self.__turn_off_lights()
+                    aircon_result = self.__turn_on_aircon() if turning_on else self.__turn_off_aircon()
+                    overall_success = bool(light_result.get("success")) and bool(aircon_result.get("success"))
+                    with self.state_lock:
+                        self.local_state["light_power"] = (light_result.get("new_state") or {}).get("light_power", self.local_state.get("light_power", "unknown"))
+                        self.local_state["aircon_power"] = (aircon_result.get("new_state") or {}).get("aircon_power", self.local_state.get("aircon_power", "unknown"))
+                        light_power = str(self.local_state.get("light_power", "unknown")).lower()
+                        aircon_power = str(self.local_state.get("aircon_power", "unknown")).lower()
+                        if light_power == "on" and aircon_power == "on":
+                            self.local_state["power"] = "on"
+                        elif light_power == "off" and aircon_power == "off":
+                            self.local_state["power"] = "off"
+                        else:
+                            self.local_state["power"] = "partial"
+                        new_state = {
+                            "power": self.local_state.get("power", "partial"),
+                            "light_power": self.local_state.get("light_power", "unknown"),
+                            "aircon_power": self.local_state.get("aircon_power", "unknown"),
+                        }
+                    result = {
+                        "success": overall_success,
+                        "message": f"Lights: {light_result.get('message', '')}; Aircon: {aircon_result.get('message', '')}",
+                        "new_state": new_state,
+                    }
+                    self._trigger_state_publication()
+                    return result
+
+                if target == "light":
+                    sub_result = self.__turn_on_lights() if turning_on else self.__turn_off_lights()
+                    state_key = "light_power"
+                else:
+                    sub_result = self.__turn_on_aircon() if turning_on else self.__turn_off_aircon()
+                    state_key = "aircon_power"
+
+                success = bool(sub_result.get("success"))
+                sub_state = (sub_result.get("new_state") or {}) if isinstance(sub_result, dict) else {}
+                updated_value = sub_state.get(state_key, "unknown")
+
                 with self.state_lock:
-                    self.local_state.update(new_state)
-                
+                    self.local_state[state_key] = updated_value
+                    light_power = str(self.local_state.get("light_power", "unknown")).lower()
+                    aircon_power = str(self.local_state.get("aircon_power", "unknown")).lower()
+                    if light_power == "on" and aircon_power == "on":
+                        self.local_state["power"] = "on"
+                    elif light_power == "off" and aircon_power == "off":
+                        self.local_state["power"] = "off"
+                    else:
+                        self.local_state["power"] = "partial"
+                    new_state = {
+                        "power": self.local_state.get("power", "partial"),
+                        "light_power": self.local_state.get("light_power", "unknown"),
+                        "aircon_power": self.local_state.get("aircon_power", "unknown"),
+                    }
+
                 result = {
-                    "success": overall_success,
-                    "message": combined_message,
-                    "new_state": new_state
+                    "success": success,
+                    "message": f"{target}: {sub_result.get('message', '')}".strip(),
+                    "new_state": new_state,
                 }
-                
-                self._trigger_state_publication()
-                
-            elif action_payload.actionName == "turn_off":
-                # Turn off both lights and aircon
-                light_result = self.__turn_off_lights()
-                aircon_result = self.__turn_off_aircon()
-                
-                # Combine results
-                overall_success = light_result["success"] and aircon_result["success"]
-                combined_message = f"Lights: {light_result['message']}; Aircon: {aircon_result['message']}"
-                
-                new_state = {
-                    "power": "off" if overall_success else "partial",
-                    "light_power": light_result.get("new_state", {}).get("light_power", "unknown"),
-                    "aircon_power": aircon_result.get("new_state", {}).get("aircon_power", "unknown")
-                }
-                
-                with self.state_lock:
-                    self.local_state.update(new_state)
-                
-                result = {
-                    "success": overall_success,
-                    "message": combined_message,
-                    "new_state": new_state
-                }
-                
                 self._trigger_state_publication()
                 
             elif action_payload.actionName == "change_mode":
