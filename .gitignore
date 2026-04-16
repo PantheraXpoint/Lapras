@@ -31,3 +31,10 @@ lapras_agents/ir_agent.py
 lapras_agents/light_agent.py
 lapras_agents/microwave_control_agent.py
 lapras_agents/smart_aircon_agent.py
+
+docker-compose.yml
+mosquitto.conf
+simulate_virtual_agent.py
+sub.sh
+smart_home_gs/start_3d_visualization_stream_old.py
+smart_home_gs/visualize_virtual_sensors_3d.html
