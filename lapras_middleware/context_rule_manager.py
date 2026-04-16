@@ -84,6 +84,10 @@ class ContextRuleManager:
         # Explicit demo control mode. In manual mode, rule-driven actuation is suppressed.
         self._control_mode = "automated"
         self._control_mode_lock = threading.Lock()
+        self.CONTROL_AGENT_TTL_SEC = 20.0
+        # Short cooldown after mode changes to avoid immediate opposite rule flips.
+        self._mode_change_cooldown_until: Dict[str, float] = {}
+        self._mode_change_cooldown_lock = threading.Lock()
         
         # Track agents needing mode detection (for startup when agents aren't connected yet)
         self.pending_mode_detection: set = set()  # Set of agent_ids that need mode detection
@@ -191,8 +195,61 @@ class ContextRuleManager:
         with self._control_mode_lock:
             self._control_mode = mode
 
+    def _canonical_control_agent_id(self, agent_id: str) -> Optional[str]:
+        """Normalize agent runtime IDs/aliases into control topology IDs."""
+        if not isinstance(agent_id, str):
+            return None
+        aid = agent_id.strip().lower()
+        if not aid:
+            return None
+        if aid in {"all", "back", "front"}:
+            return aid
+        if "aircon" in aid:
+            return "aircon"
+        if "hue" in aid or "light_hue" in aid or "hue_light" in aid:
+            return "hue_light"
+        return None
+
+    def _rule_file_applies_to_agent(self, rule_file: str, agent_id: str) -> bool:
+        """
+        Heuristic: which loaded rule files should trigger evaluation for this runtime agent.
+
+        Clubhouse demo files embed the agent id in the basename (e.g. all-normal.ttl).
+        Energy-efficient Hue rules use hue_ir_light.ttl — the substring 'hue_light' never
+        appears in the filename, so a naive basename check skips all automation for hue_light.
+        """
+        if not isinstance(rule_file, str) or not isinstance(agent_id, str):
+            return False
+        base = os.path.basename(rule_file).lower()
+        raw = agent_id.strip().lower()
+        if not base or not raw:
+            return False
+        if raw in base:
+            return True
+        canonical = self._canonical_control_agent_id(agent_id) or ""
+        if canonical == "hue_light":
+            return "hue" in base and "light" in base
+        if canonical == "aircon":
+            return "aircon" in base
+        if canonical in {"all", "back", "front"}:
+            return canonical in base
+        return False
+
     def _normalized_control_agents(self) -> Set[str]:
-        return {aid for aid in self.known_agents if aid in {"aircon", "hue_light", "all", "back", "front"}}
+        now = time.time()
+        with self.context_lock:
+            active_agent_ids = [
+                aid
+                for aid, data in self.context_map.items()
+                if isinstance(aid, str)
+                and (now - float((data or {}).get("last_update", 0.0))) <= self.CONTROL_AGENT_TTL_SEC
+            ]
+        normalized: Set[str] = set()
+        for aid in active_agent_ids:
+            canonical = self._canonical_control_agent_id(aid)
+            if canonical:
+                normalized.add(canonical)
+        return normalized
 
     def _validate_control_topology(self, running_agents: Optional[Set[str]] = None) -> Optional[str]:
         running = set(running_agents if running_agents is not None else self._normalized_control_agents())
@@ -369,6 +426,8 @@ class ContextRuleManager:
                 mode=mode,
                 message=f"Control mode set to {mode}.",
             )
+            if mode == "automated":
+                self._apply_rules_immediately_for_known_agents("control_mode switched to automated")
 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error processing control mode command: {e}", exc_info=True)
@@ -465,6 +524,21 @@ class ContextRuleManager:
             if parameters:
                 logger.info(f"[{self.service_id}] Command parameters: {parameters}")
             logger.info(f"[{self.service_id}] Command ID: {action_event.event.id}, Priority: {priority}")
+
+            # For mode switches, force immediate visible profile application when the
+            # target agent is already effectively powered.
+            if action_name == "change_mode" and self._is_agent_effectively_powered_on(agent_id):
+                logger.info(
+                    f"[{self.service_id}] Immediate mode-apply: '{agent_id}' appears powered; sending turn_on after change_mode"
+                )
+                import time
+                time.sleep(0.2)
+                self._send_action_command(
+                    agent_id=agent_id,
+                    action_name="turn_on",
+                    parameters=None,
+                    is_manual=False,
+                )
             
             # Publish success result back to dashboard
             self._publish_dashboard_command_result(
@@ -536,8 +610,11 @@ class ContextRuleManager:
                         self.pending_mode_detection.remove(agent_id)
                         # Apply mode detection only for rules relevant to this specific agent
                         if self.loaded_rule_files:
-                            relevant_rules = [rule_file for rule_file in self.loaded_rule_files 
-                                            if agent_id in os.path.basename(rule_file)]
+                            relevant_rules = [
+                                rule_file
+                                for rule_file in self.loaded_rule_files
+                                if self._rule_file_applies_to_agent(rule_file, agent_id)
+                            ]
                             if relevant_rules:
                                 logger.info(f"[{self.service_id}] 🔄 DELAYED MODE DETECTION: Processing {len(relevant_rules)} relevant rules for '{agent_id}': {relevant_rules}")
                                 self._detect_and_apply_modes_from_rules(relevant_rules)
@@ -552,7 +629,9 @@ class ContextRuleManager:
             self._publish_dashboard_state_update()
             
             # Only apply rules if there are rules relevant to this agent
-            has_relevant_rules = any(agent_id in os.path.basename(rule_file) for rule_file in self.loaded_rule_files)
+            has_relevant_rules = any(
+                self._rule_file_applies_to_agent(rule_file, agent_id) for rule_file in self.loaded_rule_files
+            )
             if has_relevant_rules:
                 logger.info(
                     f"[{self.service_id}] 📨 CONTEXT UPDATE: About to apply rules for '{agent_id}' "
@@ -582,7 +661,21 @@ class ContextRuleManager:
                     }
                 
                 # Prepare summary data
-                topology_error = self._validate_control_topology()
+                now = time.time()
+                active_running: Set[str] = set()
+                for aid, data in self.context_map.items():
+                    if not isinstance(aid, str):
+                        continue
+                    last_update = float((data or {}).get("last_update", 0.0))
+                    if (now - last_update) > self.CONTROL_AGENT_TTL_SEC:
+                        continue
+                    canonical = self._canonical_control_agent_id(aid)
+                    if canonical:
+                        active_running.add(canonical)
+
+                # IMPORTANT: pass explicit running_agents here to avoid re-entering
+                # self.context_lock inside _normalized_control_agents().
+                topology_error = self._validate_control_topology(active_running)
                 summary_data = {
                     "total_agents": len(self.context_map),
                     "known_agents": list(self.known_agents),
@@ -630,6 +723,16 @@ class ContextRuleManager:
     def _apply_rules_for_agent(self, agent_id: str, current_state: Dict[str, Any], timestamp: Any):
         """Apply rules for a specific agent when control mode/topology permit it."""
         try:
+            now_ts = time.time()
+            with self._mode_change_cooldown_lock:
+                cooldown_until = self._mode_change_cooldown_until.get(agent_id, 0.0)
+            if cooldown_until > now_ts:
+                logger.info(
+                    f"[{self.service_id}] Skipping rule-driven action for '{agent_id}' during "
+                    f"post-mode-change cooldown ({cooldown_until - now_ts:.2f}s remaining)"
+                )
+                return
+
             control_mode = self.get_control_mode()
             if control_mode != "automated":
                 logger.info(
@@ -679,6 +782,63 @@ class ContextRuleManager:
 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
+
+    def _apply_rules_immediately_for_known_agents(self, reason: str = "rule update") -> None:
+        """
+        Force a one-shot reconciliation pass using current context state.
+        This avoids waiting for the next sensor update after switching rules/modes.
+        """
+        try:
+            with self.context_lock:
+                snapshot = {
+                    aid: dict((data or {}).get("state") or {})
+                    for aid, data in self.context_map.items()
+                    if isinstance(aid, str)
+                }
+
+            if not snapshot:
+                logger.info(f"[{self.service_id}] Immediate reconciliation skipped ({reason}): no known agent state yet")
+                return
+
+            logger.info(
+                f"[{self.service_id}] Immediate reconciliation start ({reason}) for agents: {sorted(snapshot.keys())}"
+            )
+            now = time.time()
+            for agent_id, state in snapshot.items():
+                self._apply_rules_for_agent(agent_id, state, now)
+            logger.info(f"[{self.service_id}] Immediate reconciliation complete ({reason})")
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error in immediate reconciliation ({reason}): {e}", exc_info=True)
+
+    def _apply_rules_immediately_for_agents(self, agent_ids: Set[str], reason: str = "rule update") -> None:
+        """
+        Force immediate reconciliation for a selected subset of agents.
+        Used by demo rule switches to avoid perturbing unrelated running agents.
+        """
+        try:
+            if not agent_ids:
+                logger.info(f"[{self.service_id}] Immediate reconciliation skipped ({reason}): no target agents")
+                return
+
+            with self.context_lock:
+                snapshot = {
+                    aid: dict((self.context_map.get(aid) or {}).get("state") or {})
+                    for aid in sorted(agent_ids)
+                    if aid in self.context_map
+                }
+            if not snapshot:
+                logger.info(f"[{self.service_id}] Immediate reconciliation skipped ({reason}): no target state snapshot")
+                return
+
+            logger.info(
+                f"[{self.service_id}] Immediate reconciliation start ({reason}) for target agents: {sorted(snapshot.keys())}"
+            )
+            now = time.time()
+            for agent_id, state in snapshot.items():
+                self._apply_rules_for_agent(agent_id, state, now)
+            logger.info(f"[{self.service_id}] Immediate reconciliation complete ({reason})")
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error in targeted immediate reconciliation ({reason}): {e}", exc_info=True)
 
     def _apply_extended_window_logic(self, agent_id: str, current_power: str, raw_rule_decision: str) -> str:
         """
@@ -836,6 +996,25 @@ class ContextRuleManager:
         except Exception as e:
             logger.error(f"[{self.service_id}] Error sending action command to {agent_id}: {e}", exc_info=True)
 
+    def _is_agent_effectively_powered_on(self, agent_id: str) -> bool:
+        """
+        Return True when an agent appears to be active/on enough that a mode/profile
+        change should be re-applied immediately via a follow-up turn_on command.
+        """
+        try:
+            state = self.get_agent_state(agent_id) or {}
+            power = str(state.get("power", "")).lower()
+            light_power = str(state.get("light_power", "")).lower()
+            aircon_power = str(state.get("aircon_power", "")).lower()
+            # Treat partial and per-device on as effectively powered for immediate re-apply.
+            return (
+                power in {"on", "partial", "true", "1"}
+                or light_power in {"on", "true", "1"}
+                or aircon_power in {"on", "true", "1"}
+            )
+        except Exception:
+            return False
+
     def set_extended_window_duration(self, duration: float) -> None:
         """Set the extended window duration for fast vs stable behavior."""
         with self.extended_window_lock:
@@ -927,7 +1106,9 @@ class ContextRuleManager:
         """
         try:
             # Quick check: if there are no loaded rules relevant to this agent, return early
-            has_relevant_rules = any(agent_id in os.path.basename(rule_file) for rule_file in self.loaded_rule_files)
+            has_relevant_rules = any(
+                self._rule_file_applies_to_agent(rule_file, agent_id) for rule_file in self.loaded_rule_files
+            )
             if not has_relevant_rules:
                 logger.debug(f"[{self.service_id}] No relevant rules loaded for agent '{agent_id}' - skipping evaluation")
                 return None
@@ -1223,14 +1404,19 @@ class ContextRuleManager:
                     is_manual=False
                 )
                 logger.info(f"[{self.service_id}] ✅ AUTO MODE CHANGE: Command sent to {agent_id}")
+
+                # Avoid immediate opposite power flips right after mode switches.
+                with self._mode_change_cooldown_lock:
+                    self._mode_change_cooldown_until[agent_id] = time.time() + 2.5
                 
-                # Check if agent is currently powered on - if so, send turn_on to apply new mode settings
-                agent_state = self.get_agent_state(agent_id)
-                if agent_state and agent_state.get("power") == "on":
+                # If agent is effectively powered, optionally send turn_on to apply new mode settings now.
+                # Clubhouse agents already re-apply profiles internally in _change_mode,
+                # so an extra manager-level turn_on causes duplicate IR/Hue commands.
+                if self._is_agent_effectively_powered_on(agent_id) and agent_id not in {"all", "back", "front"}:
                     logger.info(f"[{self.service_id}] 🔧 AUTO MODE APPLY: Agent {agent_id} is powered on - sending turn_on to apply new {mode} mode settings")
                     # Small delay to ensure mode change is processed first
                     import time
-                    time.sleep(0.1)
+                    time.sleep(0.2)
                     self._send_action_command(
                         agent_id=agent_id,
                         action_name="turn_on",
@@ -1242,7 +1428,7 @@ class ContextRuleManager:
             except Exception as e:
                 logger.error(f"[{self.service_id}] Error sending mode change command to {agent_id}: {e}")
 
-    def load_rules(self, rdf_file_path: str) -> None:
+    def load_rules(self, rdf_file_path: str, detect_mode: bool = True) -> None:
         """Load rules from an RDF file."""
         try:
             # Check if file already loaded to avoid duplicates
@@ -1254,8 +1440,9 @@ class ContextRuleManager:
             self.loaded_rule_files.add(rdf_file_path)
             logger.info(f"[{self.service_id}] Successfully loaded rules from {rdf_file_path}")
             
-            # NEW: Auto mode detection for single file load
-            self._detect_and_apply_modes_from_rules([rdf_file_path])
+            # Auto mode detection for single file load (optional for bulk flows)
+            if detect_mode:
+                self._detect_and_apply_modes_from_rules([rdf_file_path])
             
             # Log loaded rule details for verification
             rules_query = """
@@ -1366,6 +1553,7 @@ class ContextRuleManager:
                     
                     # NEW: Auto mode detection for loaded rules
                     self._detect_and_apply_modes_from_rules(loaded_files)
+                    self._apply_rules_immediately_for_known_agents("rule load")
                     
                     success = True
                     message = f"Successfully loaded {len(loaded_files)} rule files: {loaded_files}"
@@ -1390,6 +1578,7 @@ class ContextRuleManager:
                     
                     # NEW: Auto mode detection for reloaded rules
                     self._detect_and_apply_modes_from_rules(loaded_files)
+                    self._apply_rules_immediately_for_known_agents("rule reload")
                     
                     success = True
                     message = f"Successfully reloaded {len(loaded_files)} rule files: {loaded_files}"
@@ -1398,25 +1587,103 @@ class ContextRuleManager:
                     
             elif command_action == "switch":
                 try:
+                    def _clubhouse_position_from_rule_path(path: str) -> Optional[str]:
+                        base = os.path.basename(str(path or "")).lower()
+                        if base.startswith("back-"):
+                            return "back"
+                        if base.startswith("front-"):
+                            return "front"
+                        if base.startswith("all-"):
+                            return "all"
+                        return None
+
+                    def _agents_from_rule_paths(paths: List[str]) -> Set[str]:
+                        out: Set[str] = set()
+                        for p in paths:
+                            base = os.path.basename(str(p or "")).lower()
+                            if base.startswith("back-"):
+                                out.add("back")
+                            elif base.startswith("front-"):
+                                out.add("front")
+                            elif base.startswith("all-"):
+                                out.add("all")
+                            elif "aircon" in base:
+                                out.add("aircon")
+                            elif "hue" in base and "light" in base:
+                                out.add("hue_light")
+                        return out
+
                     # Clear existing rules and reset extended window state
                     old_files = list(self.loaded_rule_files)
+                    explicitly_requested_rule_files = list(rule_files)
+
+                    # Demo UX compatibility: when switching one positional clubhouse rule
+                    # (back/front), preserve the opposite positional rule so both agents
+                    # can keep running concurrently after sequential applies.
+                    effective_rule_files = list(rule_files)
+                    if demo_ui_source and effective_rule_files:
+                        requested_positions = {
+                            _clubhouse_position_from_rule_path(p)
+                            for p in effective_rule_files
+                        } - {None}
+                        if requested_positions <= {"back", "front"} and len(requested_positions) == 1:
+                            requested_position = next(iter(requested_positions))
+                            opposite_position = "front" if requested_position == "back" else "back"
+                            opposite_existing = [
+                                p for p in old_files
+                                if _clubhouse_position_from_rule_path(p) == opposite_position
+                            ]
+                            if opposite_existing:
+                                keep_file = opposite_existing[0]
+                                if keep_file not in effective_rule_files:
+                                    effective_rule_files.append(keep_file)
+                                    logger.info(
+                                        f"[{self.service_id}] Demo clubhouse pair mode: preserving '{opposite_position}' "
+                                        f"rule alongside requested '{requested_position}' rule: {keep_file}"
+                                    )
+
                     self.clear_rules()
                     
                     # Clear extended window state when switching rules (will be recreated below)
-                    with self.extended_window_lock:
-                        self.extended_window_agents.clear()
+                    if demo_ui_source:
+                        logger.info(
+                            f"[{self.service_id}] Demo source rule switch: preserving existing extended windows "
+                            f"to avoid cross-agent AC oscillation"
+                        )
+                    else:
+                        with self.extended_window_lock:
+                            self.extended_window_agents.clear()
                     
                     # Load new rule files
                     loaded_files = []
-                    for rule_file in rule_files:
-                        self.load_rules(rule_file)
+                    for rule_file in effective_rule_files:
+                        self.load_rules(rule_file, detect_mode=False)
                         loaded_files.append(rule_file)
                     
-                    # NEW: Set 5-second windows for all agents after switching rules
-                    self._set_fast_response_window_for_all_agents("rule switch")
+                    # For dashboard demo applies, avoid globally forcing fast-response windows.
+                    # Fast-response allows immediate OFF and can cause visible AC flapping
+                    # when back/front rules are updated close together.
+                    if demo_ui_source:
+                        logger.info(
+                            f"[{self.service_id}] Demo source rule switch: keeping normal extended windows "
+                            f"(skip fast-response-for-all to reduce AC oscillation)"
+                        )
+                    else:
+                        # NEW: Set 5-second windows for all agents after switching rules
+                        self._set_fast_response_window_for_all_agents("rule switch")
                     
                     # NEW: Auto mode detection for switched rules
-                    self._detect_and_apply_modes_from_rules(loaded_files)
+                    if demo_ui_source:
+                        # Only apply mode/reconciliation for explicitly requested files.
+                        # Preserved opposite clubhouse files remain active but should not be
+                        # force-reconciled during a single-agent demo update.
+                        mode_files = explicitly_requested_rule_files or loaded_files
+                        self._detect_and_apply_modes_from_rules(mode_files)
+                        target_agents = _agents_from_rule_paths(mode_files)
+                        self._apply_rules_immediately_for_agents(target_agents, "rule switch (targeted)")
+                    else:
+                        self._detect_and_apply_modes_from_rules(loaded_files)
+                        self._apply_rules_immediately_for_known_agents("rule switch")
                     
                     success = True
                     message = f"Successfully switched from {old_files} to {loaded_files}"
@@ -1472,11 +1739,18 @@ class ContextRuleManager:
                             self.load_rules(rule_file)
                             loaded_files.append(rule_file)
                         
-                        # NEW: Set 5-second windows for all agents after switching presets
-                        self._set_fast_response_window_for_all_agents("preset switch")
+                        if demo_ui_source:
+                            logger.info(
+                                f"[{self.service_id}] Demo source preset switch: keeping normal extended windows "
+                                f"(skip fast-response-for-all to reduce AC oscillation)"
+                            )
+                        else:
+                            # NEW: Set 5-second windows for all agents after switching presets
+                            self._set_fast_response_window_for_all_agents("preset switch")
                         
                         # NEW: Auto mode detection for preset rules
                         self._detect_and_apply_modes_from_rules(loaded_files)
+                        self._apply_rules_immediately_for_known_agents("preset switch")
                         
                         success = True
                         message = f"Successfully switched to preset '{preset_name}': {loaded_files}"
