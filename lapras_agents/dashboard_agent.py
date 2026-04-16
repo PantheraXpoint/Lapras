@@ -30,10 +30,10 @@ class DashboardAgent(VirtualAgent):
         # Default comprehensive sensor configuration 
         if sensor_config is None:
             sensor_config = {
-                "infrared": ["infrared_1", "infrared_2"],
+                "infrared": ["infrared_1", "infrared_2", "infrared_3", "infrared_4"],
                 "distance": ["distance_1", "distance_2", "distance_3", "distance_4"],  # Add distance sensors
                 "motion": ["motion_01", "motion_02", "motion_03", "motion_04", "motion_05", "motion_06", "motion_07", "motion_08", "motion_mp1", "motion_mf1", "motion_mb1"],
-                "temperature": ["temperature_1", "temperature_2","temperature_3"],
+                "temperature": ["temperature_1"],
                 "door": ["door_01"],
                 "activity": ["activity_s1b", "activity_s2a", "activity_s3a", "activity_s4a","activity_s5a","activity_s6a","activity_s7a","activity_s2b","activity_s3b","activity_s4b","activity_s5b","activity_s6b","activity_s7b"],
                 "light": ["light_1"],  # Add light sensors - will be populated if available
