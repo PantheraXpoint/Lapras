@@ -1,0 +1,242 @@
+# Task: Add a RAG-based chat VQA system to the LAPRAS++ Smart Home ground station
+
+## Context
+This repo is a live 3D sensor visualization. The backend (`start_3d_visualization_stream.py`) serves an HTTP API on port 8888 and runs a `LiveCaptionEngine` that generates one natural-language caption every 30 seconds from a rolling sensor window. Captions are shown in the right-hand "Insights" panel.
+
+The frontend (`visualize_smart_room_aframe.html`) has a chat panel (`#chat-panel`, `#chat-input`, `#chat-send`, `#chat-messages`) that currently just echoes "Received." Wire it to a real RAG pipeline over historical captions.
+
+## Goal
+A chat that answers questions like:
+- Time-range summary: "What happened between 10am and 11am on April 2, 2026?"
+- Semantic: "Was the AC on this afternoon?"
+- **Event search with duration**: "When was there a meeting?" → returns a list of time intervals with descriptions.
+
+## Architecture
+
+```
+Browser chat ──POST /api/chat──▶ Backend
+                                   │
+                                   ├─▶ Query classifier (LLM) → {time_range | semantic | event_search | hybrid}
+                                   │
+                                   ├─▶ Milvus retrieval (metadata filter ± vector search)
+                                   │
+                                   ├─▶ [event_search only] Temporal clustering of hits into intervals
+                                   │
+                                   └─▶ LLM answer synthesis over retrieved captions/intervals
+                                   ▼
+                                JSON {answer, citations | intervals, query_type}
+```
+
+Captions are written to Milvus from two sources:
+1. **Live**: `LiveCaptionEngine` upserts every new caption immediately.
+2. **Backfill**: CLI script indexes `logs/*_captions_*.json`.
+
+## Part A — Improve single-caption generation (prerequisite)
+
+Locate the existing `build_prompt` used for single-window caption generation (in `start_3d_visualization_stream.py`'s `LiveCaptionEngine` and mirror the change in `sensor_caption_infer.py` and `generate_three_case_captions.py` if they share the same prompt shape). Extend it with **3 few-shot examples** so captions are more discriminable for later retrieval:
+
+```
+Few-shot examples (style and length reference):
+
+Example 1 — empty room:
+Window: 2026-04-02T10:00:00+09:00 to 2026-04-02T10:00:30+09:00
+status_counts: {"distance": {"far": 2}, "infrared": {"far": 2}, "motion": {"no_motion": 1}, "activity": {"idle": 1}, "door": {"closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}
+status_change_count: 0
+Caption: The room appears empty with no occupancy evidence on any distance, infrared, motion, or activity sensor; the door is closed, lighting is sufficient, and temperature is normal, so the scene is stable and no HVAC or lighting action is needed.
+
+Example 2 — single person (study):
+Window: 2026-04-02T14:30:00+09:00 to 2026-04-02T14:30:30+09:00
+status_counts: {"distance": {"near": 1, "far": 1}, "infrared": {"near": 1, "far": 1}, "motion": {"no_motion": 1}, "activity": {"idle": 1}, "door": {"closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}
+status_change_count: 1
+Caption: One occupant is likely present and stationary, with a single distance and infrared sensor reporting near while motion and activity remain idle, consistent with focused desk work such as studying; the door is closed and the scene is mostly stable with comfortable lighting and temperature.
+
+Example 3 — group (meeting):
+Window: 2026-04-02T16:00:00+09:00 to 2026-04-02T16:00:30+09:00
+status_counts: {"distance": {"near": 3, "far": 1}, "infrared": {"near": 3, "far": 1}, "motion": {"motion": 1}, "activity": {"active": 2}, "door": {"open": 1, "closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}
+status_change_count: 5
+Caption: Multiple occupants are likely present, with three distance and three infrared sensors reporting near alongside active motion and two active chairs, consistent with a group gathering or meeting; a recent door-open event and a highly dynamic scene with frequent state transitions suggest people entering and interacting around the table.
+```
+
+Insert these examples into the prompt **before** the final "Window / status_counts / status_change_count / Caption:" block so the model sees them as references. Keep the existing Interpretation policy intact.
+
+This makes the single-caption vocabulary consistent enough ("empty", "studying", "meeting", "group", "single occupant") that semantic retrieval in Part C/D actually works.
+
+## Part B — Milvus & embedding layer
+
+### `rag/embeddings.py`
+- Use `sentence-transformers` to load **`jinaai/jina-clip-v1`** with `trust_remote_code=True`. Dim = 768.
+- Text-only use (jina-clip-v1 supports this via `encode(text=...)`); do not pass images.
+- Module-level singleton so the model loads once.
+- Expose `embed(text) -> list[float]`, `embed_batch(texts) -> list[list[float]]`, `DIM`.
+
+### `rag/milvus_store.py`
+- **Milvus Lite** (`pymilvus`, file path `./data/captions.db`).
+- Collection `smart_room_captions`:
+  - `id` INT64 primary auto
+  - `room_id` VARCHAR(64)
+  - `ts_unix` DOUBLE (window_start UTC epoch; used for range filters and ordering)
+  - `ts_iso` VARCHAR(64)
+  - `window_end_unix` DOUBLE
+  - `caption` VARCHAR(4096)
+  - `summary_json` VARCHAR(8192)
+  - `embedding` FLOAT_VECTOR dim=768
+- HNSW index on `embedding`, metric COSINE.
+- Methods:
+  - `upsert(record: dict)` — dedupes by `(room_id, ts_unix)` (delete-then-insert is fine for Lite).
+  - `search_semantic(vector, top_k, ts_range=None, room_id=None)` — vector search with optional epoch range filter expr `ts_unix >= X && ts_unix <= Y`.
+  - `search_time_range(start_unix, end_unix, room_id, limit=500)` — filter-only query ordered by `ts_unix`.
+  - `count(room_id=None)`.
+- Must degrade gracefully: if `pymilvus` import fails, export a `MilvusUnavailable` sentinel and let callers skip writes.
+
+## Part C — Query engine: `rag/query_engine.py`
+
+Constants at top of file:
+```python
+USER_TZ = ZoneInfo("Asia/Seoul")   # easy to change
+EVENT_GAP_SEC = 120                 # clustering gap for event_search
+EVENT_MIN_DURATION_SEC = 30         # discard blips shorter than this
+```
+
+### Step 1 — Classify
+Call the in-process LLM (the same instance `LiveCaptionEngine` holds — pass it in via constructor, do NOT load a second copy). Prompt it to emit STRICT JSON:
+
+```json
+{
+  "type": "time_range" | "semantic" | "event_search" | "hybrid",
+  "start_iso": "ISO8601 or null",
+  "end_iso": "ISO8601 or null",
+  "semantic_query": "rephrased query for vector search, or null",
+  "event_label": "short noun phrase like 'meeting' or 'empty room', or null"
+}
+```
+
+Rules to include in the classifier prompt:
+- "when was there a X" / "what time was the X" / "find all X" → `event_search` with `event_label`.
+- "what happened between A and B" / "summarize A to B" → `time_range`.
+- "was X ever on", "did anyone Y" without a time window → `semantic`.
+- Time range mentioned + specific question → `hybrid`.
+- Parse user-provided times as **Asia/Seoul** unless a TZ is explicit. Convert to UTC epoch before handing to Milvus.
+
+Use `dateutil.parser` with a fallback; on parse failure, set times to null and downgrade to `semantic`.
+
+### Step 2 — Retrieve
+
+- **time_range**: `search_time_range(start, end)`. If >200 rows, downsample to ~50 evenly spaced keeping first and last.
+- **semantic**: `search_semantic(embed(semantic_query), top_k=10)`.
+- **hybrid**: `search_semantic(embed(semantic_query), top_k=15, ts_range=(start,end))`.
+- **event_search**:
+  1. Build an expansion prompt from `event_label`. For "meeting" embed a query like `"multiple occupants group gathering meeting many sensors active"`; for "empty room" embed `"room empty no occupancy no motion no activity"`; for "studying" embed `"single occupant stationary desk work focused studying"`. Have the LLM generate the expansion at classify time (add an `expansion_query` field) OR use a small hardcoded dict keyed by common labels with LLM fallback.
+  2. `search_semantic(embed(expansion_query), top_k=100)` optionally filtered by `ts_range` if the user also gave one.
+  3. Filter hits by a similarity threshold (cosine ≥ 0.55; tune later).
+  4. **Cluster into intervals**: sort by `ts_unix`; group consecutive hits whose gap ≤ `EVENT_GAP_SEC`; for each cluster emit `{start_unix, end_unix, member_ts:[...], sample_captions:[first, middle, last]}`. Drop clusters shorter than `EVENT_MIN_DURATION_SEC`.
+
+### Step 3 — Synthesize
+Separate prompts for each path.
+
+**time_range** and **semantic/hybrid** prompt shape:
+- Numbered list of retrieved captions with KST timestamp.
+- Instructions: one paragraph for time_range (operational summary); direct answer + evidence list for semantic/hybrid. Cite as `[#N]`.
+- "If evidence is empty, say 'No matching activity was recorded.' Do not invent timestamps or events."
+
+**event_search** prompt shape:
+- Provide the clustered intervals with start/end (KST), duration (human-readable: `Xm Ys`), and 1–3 sample captions per cluster.
+- Instructions: list each interval as `• 14:05:00 – 14:37:30 KST (32m 30s) — <one-sentence description grounded in the sample captions>`; then one short closing sentence with overall count. No invention beyond what the captions state.
+
+### Return shape
+```json
+{
+  "answer": "rendered text",
+  "query_type": "event_search",
+  "citations": [{"n":1,"ts_iso_kst":"2026-04-02 14:05:00+09:00","caption":"..."}],
+  "intervals": [{"start_iso_kst":"...","end_iso_kst":"...","duration_sec":1950,"summary":"..."}] // only for event_search
+}
+```
+
+## Part D — Live write hook
+In `LiveCaptionEngine`, after a caption is successfully produced:
+- Spawn a short-lived thread (or use a single worker thread + queue) that:
+  1. Calls `embed(caption)`.
+  2. Calls `milvus_store.upsert({room_id, ts_unix, ts_iso, window_end_unix, caption, summary_json, embedding})`.
+- On any exception: log `warning` and drop the write. Never block or crash the live loop.
+
+## Part E — HTTP endpoint
+`POST /api/chat` in `start_3d_visualization_stream.py`:
+- Body: `{"message": str, "room_id": "n1_lab"}`.
+- Calls `rag.query_engine.answer(message, room_id, llm=<shared instance>)`.
+- Simple in-memory token bucket: 10 req/min/IP.
+- If RAG disabled (import fail or `--disable-rag`): return 503 `{"error":"RAG disabled"}`.
+- On handler exception: 500 `{"error":"<msg>"}`.
+
+## Part F — Frontend wiring
+Edit `visualize_smart_room_aframe.html`:
+
+Replace the placeholder `sendChatMessage()`:
+1. Append user bubble.
+2. Append "Thinking…" assistant placeholder.
+3. `fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message, room_id: roomId})})`.
+4. Replace placeholder with `answer`.
+5. If `intervals` present → render a compact block under the answer:
+   ```
+   Intervals:
+   • 14:05:00 – 14:37:30 KST (32m 30s) — <summary>
+   • 16:00:00 – 16:18:00 KST (18m 0s) — <summary>
+   ```
+6. Else if `citations` present → render collapsible "Sources (N)" with `[#1] <ts> — <caption>` lines.
+7. On error → `.chat-msg-error` bubble (light red bg).
+
+Add CSS classes: `.chat-msg-error`, `.citation-list`, `.interval-list` (small font, muted color, monospace for times).
+
+## Part G — Backfill CLI: `index_captions_to_milvus.py`
+```
+python3 index_captions_to_milvus.py --logs-dir logs/ [--reindex] [--room-id n1_lab] [--db-path ./data/captions.db]
+```
+- Glob `logs/*_captions_*.json`, iterate `windows[]`.
+- For each window: compute embedding from `caption`, upsert with `ts_unix = window_start_unix`.
+- Without `--reindex`: skip `(room_id, ts_unix)` already in collection.
+- Batch embeddings (e.g., size 32) for speed.
+- Print progress every 50 rows, final count.
+
+## Part H — Entry-point CLI flags
+Add to `start_3d_visualization_stream.py`:
+- `--milvus-db-path` (default `./data/captions.db`)
+- `--embedding-model` (default `jinaai/jina-clip-v1`)
+- `--disable-rag`
+
+## Part I — Dependencies: `requirements-rag.txt`
+```
+pymilvus>=2.4.0
+sentence-transformers>=2.7.0
+einops
+timm
+python-dateutil>=2.8.2
+```
+(`einops` and `timm` are pulled by jina-clip-v1's remote code.)
+
+## Part J — README
+Add "RAG Chat" section:
+- Install deps.
+- First run: `python3 index_captions_to_milvus.py --logs-dir logs/`.
+- Start server normally; chat panel is now live.
+- Test queries:
+  - `curl -X POST http://localhost:8888/api/chat -H 'Content-Type: application/json' -d '{"message":"what happened between 10 and 11 am on April 2 2026","room_id":"n1_lab"}'`
+  - `curl ... -d '{"message":"when was there a meeting?","room_id":"n1_lab"}'`
+  - `curl ... -d '{"message":"was the room empty this morning?","room_id":"n1_lab"}'`
+
+## Hard constraints
+- Reuse the LLM instance from `LiveCaptionEngine`; do not load a second copy.
+- If `pymilvus` or `sentence-transformers` imports fail, server must still start with RAG endpoint returning 503.
+- All timestamps stored as UTC epoch; KST is a display/input concern only.
+- Live write path must never block the caption loop.
+- Do not break any existing endpoint, caption rendering, or 3D viz behavior.
+
+## Build order
+1. Part A few-shot prompt change — confirm captions still render end-to-end.
+2. Part B `embeddings.py` + `milvus_store.py` with a tiny `__main__` smoke test (insert 2, semantic-search 1, range-query both).
+3. Part G backfill script — run it on existing `logs/` and print the final count.
+4. Part C `query_engine.py` — unit-test each of the 4 query types with canned inputs.
+5. Part D live write hook.
+6. Part E `/api/chat` endpoint.
+7. Part F frontend.
+8. Parts H–J polish.
+
+After each numbered step, stop and show me (a) what changed, (b) a quick test result, before moving on.

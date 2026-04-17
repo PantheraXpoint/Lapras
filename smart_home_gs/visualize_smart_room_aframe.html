@@ -153,6 +153,40 @@
       cursor: pointer;
     }
     #chat-send:hover { background: #0284c7; }
+    .chat-msg-error {
+      align-self: flex-start;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+    }
+    .citation-list {
+      margin-top: 6px;
+      font-size: 10px;
+      color: #64748b;
+    }
+    .citation-list summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #475569;
+    }
+    .citation-list div {
+      font-family: monospace;
+      padding: 1px 0;
+      line-height: 1.3;
+    }
+    .interval-list {
+      margin-top: 6px;
+      font-size: 10px;
+      color: #64748b;
+    }
+    .interval-list strong {
+      color: #475569;
+    }
+    .interval-list div {
+      font-family: monospace;
+      padding: 1px 0;
+      line-height: 1.3;
+    }
     .control-rows {
       display: flex;
       flex-direction: column;
@@ -681,22 +715,84 @@
       let latestLocalPayload = {};
       let latestPayloadByAgent = {};
 
-      function appendChatMessage(text, role = 'assistant') {
-        if (!chatMessagesEl || !text) return;
+      function appendChatMessage(text, role = 'assistant', extraHTML = '') {
+        if (!chatMessagesEl) return;
         const item = document.createElement('div');
-        item.className = `chat-msg ${role === 'user' ? 'chat-msg-user' : 'chat-msg-assistant'}`;
-        item.textContent = text;
+        if (role === 'user') {
+          item.className = 'chat-msg chat-msg-user';
+          item.textContent = text;
+        } else if (role === 'error') {
+          item.className = 'chat-msg chat-msg-error';
+          item.textContent = text;
+        } else {
+          item.className = 'chat-msg chat-msg-assistant';
+          item.textContent = text;
+          if (extraHTML) {
+            const extra = document.createElement('div');
+            extra.innerHTML = extraHTML;
+            item.appendChild(extra);
+          }
+        }
         chatMessagesEl.appendChild(item);
         chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        return item;
       }
 
-      function sendChatMessage() {
+      function formatCitations(citations) {
+        if (!citations || citations.length === 0) return '';
+        let html = '<details class="citation-list"><summary>Sources (' + citations.length + ')</summary>';
+        citations.forEach(c => {
+          html += '<div>[#' + c.n + '] ' + (c.ts_iso_kst || '') + ' &mdash; ' + (c.caption || '').substring(0, 120) + '</div>';
+        });
+        html += '</details>';
+        return html;
+      }
+
+      function formatIntervals(intervals) {
+        if (!intervals || intervals.length === 0) return '';
+        let html = '<div class="interval-list"><strong>Intervals:</strong>';
+        intervals.forEach(iv => {
+          const start = (iv.start_iso_kst || '').split(' ').pop() || '';
+          const end = (iv.end_iso_kst || '').split(' ').pop() || '';
+          const dur = iv.duration_sec ? Math.floor(iv.duration_sec / 60) + 'm ' + (iv.duration_sec % 60) + 's' : '';
+          const summary = iv.summary || '';
+          html += '<div>&bull; ' + start + ' &ndash; ' + end + ' KST (' + dur + ')' + (summary ? ' &mdash; ' + summary : '') + '</div>';
+        });
+        html += '</div>';
+        return html;
+      }
+
+      async function sendChatMessage() {
         if (!chatInputEl) return;
         const text = (chatInputEl.value || '').trim();
         if (!text) return;
         appendChatMessage(text, 'user');
-        appendChatMessage('Received.', 'assistant');
         chatInputEl.value = '';
+        const thinkingEl = appendChatMessage('Thinking...', 'assistant');
+        try {
+          const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, room_id: roomId }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            if (thinkingEl) thinkingEl.remove();
+            appendChatMessage(data.error || 'Request failed', 'error');
+            return;
+          }
+          if (thinkingEl) thinkingEl.remove();
+          let extraHTML = '';
+          if (data.intervals && data.intervals.length > 0) {
+            extraHTML = formatIntervals(data.intervals);
+          } else if (data.citations && data.citations.length > 0) {
+            extraHTML = formatCitations(data.citations);
+          }
+          appendChatMessage(data.answer || 'No answer.', 'assistant', extraHTML);
+        } catch (err) {
+          if (thinkingEl) thinkingEl.remove();
+          appendChatMessage('Error: ' + err.message, 'error');
+        }
       }
 
       if (chatSendBtn) chatSendBtn.addEventListener('click', sendChatMessage);

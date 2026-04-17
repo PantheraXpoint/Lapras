@@ -1,0 +1,5 @@
+pymilvus>=2.4.0
+sentence-transformers>=2.7.0
+einops
+timm
+python-dateutil>=2.8.2

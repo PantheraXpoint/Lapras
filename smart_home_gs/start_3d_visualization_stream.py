@@ -825,6 +825,8 @@ class LiveCaptionEngine:
         window_sec: int = 30,
         model_name: str = "qwenlm",
         gpus: int = 1,
+        milvus_store=None,
+        embedding_model: str = "jinaai/jina-clip-v1",
     ) -> None:
         self.store = store
         self.window_sec = max(1, int(window_sec))
@@ -837,6 +839,17 @@ class LiveCaptionEngine:
         self._stop_event = threading.Event()
         self._llm = None
         self._model_init_failed = False
+        self._milvus_store = milvus_store
+        self._embedding_model = embedding_model
+        self._milvus_queue: Optional[Any] = None
+        self._milvus_worker: Optional[threading.Thread] = None
+        if milvus_store:
+            import queue
+            self._milvus_queue = queue.Queue(maxsize=200)
+            self._milvus_worker = threading.Thread(
+                target=self._milvus_write_loop, daemon=True, name="milvus-writer"
+            )
+            self._milvus_worker.start()
 
     def _get_sensor_status(self, sensor: Dict[str, Any]) -> Optional[str]:
         sensor_type = sensor.get("sensor_type")
@@ -1003,6 +1016,28 @@ class LiveCaptionEngine:
             "status_change_count=1\n"
             "Example C caption:\n"
             "There is limited but non-zero occupancy evidence (one active activity signal), so brief presence is possible; the room is cold and may need heating, while strong daylight suggests additional artificial lighting is unnecessary at the moment.\n\n"
+            "Few-shot examples (style and length reference):\n\n"
+            "Example 1 — empty room:\n"
+            "Window: 2026-04-02T10:00:00+09:00 to 2026-04-02T10:00:30+09:00\n"
+            'status_counts: {"distance": {"far": 2}, "infrared": {"far": 2}, "motion": {"no_motion": 1}, '
+            '"activity": {"idle": 1}, "door": {"closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}\n'
+            "status_change_count: 0\n"
+            "Caption: The room appears empty with no occupancy evidence on any distance, infrared, motion, or activity sensor; "
+            "the door is closed, lighting is sufficient, and temperature is normal, so the scene is stable and no HVAC or lighting action is needed.\n\n"
+            "Example 2 — single person (study):\n"
+            "Window: 2026-04-02T14:30:00+09:00 to 2026-04-02T14:30:30+09:00\n"
+            'status_counts: {"distance": {"near": 1, "far": 1}, "infrared": {"near": 1, "far": 1}, "motion": {"no_motion": 1}, '
+            '"activity": {"idle": 1}, "door": {"closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}\n'
+            "status_change_count: 1\n"
+            "Caption: One occupant is likely present and stationary, with a single distance and infrared sensor reporting near while motion and activity remain idle, "
+            "consistent with focused desk work such as studying; the door is closed and the scene is mostly stable with comfortable lighting and temperature.\n\n"
+            "Example 3 — group (meeting):\n"
+            "Window: 2026-04-02T16:00:00+09:00 to 2026-04-02T16:00:30+09:00\n"
+            'status_counts: {"distance": {"near": 3, "far": 1}, "infrared": {"near": 3, "far": 1}, "motion": {"motion": 1}, '
+            '"activity": {"active": 2}, "door": {"open": 1, "closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}\n'
+            "status_change_count: 5\n"
+            "Caption: Multiple occupants are likely present, with three distance and three infrared sensors reporting near alongside active motion and two active chairs, "
+            "consistent with a group gathering or meeting; a recent door-open event and a highly dynamic scene with frequent state transitions suggest people entering and interacting around the table.\n\n"
             f"Window: {start_iso} to {end_iso}\n"
             f"status_counts: {json.dumps(status_counts, ensure_ascii=False)}\n"
             f"status_change_count: {status_change_count}\n\n"
@@ -1026,6 +1061,47 @@ class LiveCaptionEngine:
             self._model_init_failed = True
             logger.error("Caption model init failed: %s", e, exc_info=True)
             return None
+
+    def get_llm(self):
+        """Return the shared LLM instance (used by RAG query engine)."""
+        return self._ensure_model()
+
+    def _milvus_write_loop(self) -> None:
+        """Worker thread that drains the queue and writes to Milvus."""
+        while not self._stop_event.is_set():
+            try:
+                item = self._milvus_queue.get(timeout=1.0)
+            except Exception:
+                continue
+            try:
+                from rag.embeddings import embed as _embed
+                caption = item["caption"]
+                vec = _embed(caption, model_name=self._embedding_model)
+                item["embedding"] = vec
+                self._milvus_store.upsert(item)
+                logger.debug("Milvus upsert: room=%s ts=%.1f", item.get("room_id"), item.get("ts_unix"))
+            except Exception as e:
+                logger.warning("Milvus write failed (dropping): %s", e)
+
+    def _enqueue_milvus_write(
+        self, room_id: str, start_unix: float, end_unix: float,
+        start_iso: str, caption: str, summary_json: str,
+    ) -> None:
+        """Enqueue a caption for async Milvus write. Never blocks the caption loop."""
+        if not self._milvus_store or not self._milvus_queue:
+            return
+        record = {
+            "room_id": room_id,
+            "ts_unix": start_unix,
+            "ts_iso": start_iso,
+            "window_end_unix": end_unix,
+            "caption": caption,
+            "summary_json": summary_json[:8192],
+        }
+        try:
+            self._milvus_queue.put_nowait(record)
+        except Exception:
+            logger.warning("Milvus write queue full, dropping caption for room=%s ts=%.1f", room_id, start_unix)
 
     def ingest_record(self, received_at_unix: float, payload_sensors: Dict[str, Any]) -> None:
         record = {"received_at_unix": received_at_unix, "payload_sensors": payload_sensors or {}}
@@ -1085,7 +1161,17 @@ class LiveCaptionEngine:
                 continue
             prompt = self._build_prompt(start_iso, end_iso, summary, room_id=room_id)
             response = llm.generate_response({"text": prompt}, max_new_tokens=256, temperature=0.4)
-            captions_by_room[room_id] = " ".join((response or "").strip().split())
+            caption_text = " ".join((response or "").strip().split())
+            captions_by_room[room_id] = caption_text
+            # Enqueue async Milvus write
+            self._enqueue_milvus_write(
+                room_id=room_id,
+                start_unix=start_unix,
+                end_unix=end_unix,
+                start_iso=start_iso,
+                caption=caption_text,
+                summary_json=json.dumps(summary, ensure_ascii=False),
+            )
         return captions_by_room
 
     def run_forever(self) -> None:
@@ -1303,10 +1389,17 @@ def make_handler(
     store: LiveSensorStore,
     html_path: str,
     ops_client: Optional[DashboardOpsClient] = None,
+    caption_engine: Optional[LiveCaptionEngine] = None,
+    milvus_store=None,
+    rag_enabled: bool = True,
 ):
     # Directory containing the HTML file — static files are served from here
     static_dir = os.path.dirname(os.path.abspath(html_path))
     html_filename = os.path.basename(html_path)
+    # Simple token bucket for /api/chat rate limiting: 10 req/min/IP
+    _chat_rate: Dict[str, List[float]] = {}
+    _CHAT_RATE_LIMIT = 10
+    _CHAT_RATE_WINDOW = 60.0
 
     class Handler(BaseHTTPRequestHandler):
         def _write_json(self, payload: Dict[str, Any], status: int = HTTPStatus.OK):
@@ -1410,9 +1503,82 @@ def make_handler(
                 status=HTTPStatus.NOT_FOUND,
             )
 
+        def _read_json_body(self) -> Optional[Dict[str, Any]]:
+            length_hdr = self.headers.get("Content-Length", "0")
+            try:
+                length = int(length_hdr)
+            except ValueError:
+                length = 0
+            raw = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                return json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                return None
+
+        def _handle_chat(self, body: Dict[str, Any]):
+            if not rag_enabled or not milvus_store:
+                self._write_json(
+                    {"error": "RAG disabled"},
+                    status=HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            # Rate limiting
+            client_ip = self.client_address[0]
+            now = time.time()
+            timestamps = _chat_rate.get(client_ip, [])
+            timestamps = [t for t in timestamps if now - t < _CHAT_RATE_WINDOW]
+            if len(timestamps) >= _CHAT_RATE_LIMIT:
+                self._write_json(
+                    {"error": "Rate limit exceeded. Max 10 requests per minute."},
+                    status=HTTPStatus.TOO_MANY_REQUESTS,
+                )
+                return
+            timestamps.append(now)
+            _chat_rate[client_ip] = timestamps
+
+            message = body.get("message", "").strip()
+            room_id = body.get("room_id", "n1_lab")
+            if not message:
+                self._write_json({"error": "message required"}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            llm = caption_engine.get_llm() if caption_engine else None
+            if llm is None:
+                self._write_json(
+                    {"error": "LLM not available"},
+                    status=HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+
+            try:
+                from rag.query_engine import answer as rag_answer
+                result = rag_answer(
+                    message=message,
+                    room_id=room_id,
+                    llm=llm,
+                    store=milvus_store,
+                )
+                self._write_json(result)
+            except Exception as exc:
+                logger.error("Chat endpoint error: %s", exc, exc_info=True)
+                self._write_json(
+                    {"error": str(exc)},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+
         def do_POST(self):
             parsed = urlparse(self.path)
             path_only = parsed.path or self.path
+
+            # /api/chat is handled separately (doesn't need ops_client)
+            if path_only == "/api/chat":
+                body = self._read_json_body()
+                if body is None:
+                    self._write_json({"error": "invalid JSON body"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._handle_chat(body)
+                return
+
             if path_only not in (
                 "/api/control/mode",
                 "/api/control/command",
@@ -1733,6 +1899,9 @@ def main():
         default="index.html",
         help="Path to the 3D visualization HTML file",
     )
+    parser.add_argument("--milvus-db-path", default="./data/captions.db", help="Milvus Lite DB file path")
+    parser.add_argument("--embedding-model", default="jinaai/jina-clip-v1", help="Embedding model name")
+    parser.add_argument("--disable-rag", action="store_true", help="Disable RAG chat endpoint")
     args = parser.parse_args()
 
     html_path = (
@@ -1746,12 +1915,30 @@ def main():
     logger.info("[3D] Static dir: %s", os.path.dirname(os.path.abspath(html_path)))
     logger.info("[3D] HTTP bind: http://%s:%s", args.http_host, args.http_port)
 
+    # Initialize Milvus store (graceful degradation)
+    milvus_store_instance = None
+    rag_enabled = not args.disable_rag
+    if rag_enabled:
+        try:
+            from rag.milvus_store import create_store
+            milvus_store_instance = create_store(db_path=args.milvus_db_path)
+            if milvus_store_instance:
+                logger.info("[3D] Milvus store initialized at %s", args.milvus_db_path)
+            else:
+                logger.warning("[3D] Milvus store unavailable — RAG chat will return 503")
+                rag_enabled = False
+        except Exception as exc:
+            logger.warning("[3D] Milvus init failed: %s — RAG chat disabled", exc)
+            rag_enabled = False
+
     store = LiveSensorStore()
     caption_engine = LiveCaptionEngine(
         store=store,
         window_sec=args.caption_window_sec,
         model_name=args.caption_model,
         gpus=args.caption_gpus,
+        milvus_store=milvus_store_instance if rag_enabled else None,
+        embedding_model=args.embedding_model,
     )
     bridge = SourcePayloadBridge(args.mqtt_broker, args.mqtt_port, store, caption_engine=caption_engine)
 
@@ -1767,7 +1954,12 @@ def main():
     except Exception as exc:
         logger.warning("[3D] Ops MQTT client disabled: %s", exc)
 
-    handler = make_handler(store, html_path, ops_client=ops_client)
+    handler = make_handler(
+        store, html_path, ops_client=ops_client,
+        caption_engine=caption_engine,
+        milvus_store=milvus_store_instance if rag_enabled else None,
+        rag_enabled=rag_enabled,
+    )
     httpd = ThreadingHTTPServer((args.http_host, args.http_port), handler)
 
     print("\n" + "=" * 60)
@@ -1786,8 +1978,10 @@ def main():
     print(f"Preset POST: http://{args.http_host}:{args.http_port}/api/automation/preset/apply")
     print(f"Thres POST:  http://{args.http_host}:{args.http_port}/api/automation/threshold/apply")
     print(f"Sensr POST:  http://{args.http_host}:{args.http_port}/api/sensor-config/apply")
+    print(f"Chat POST:   http://{args.http_host}:{args.http_port}/api/chat")
     print(f"XML URL:     http://{args.http_host}:{args.http_port}/smart_room.xml")
     print(f"Captioning:  enabled (window={args.caption_window_sec}s, model={args.caption_model})")
+    print(f"RAG Chat:    {'enabled' if rag_enabled else 'disabled'}")
     print("\nPress Ctrl+C to stop.\n")
     print("=" * 60)
 

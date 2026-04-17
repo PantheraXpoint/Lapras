@@ -104,6 +104,28 @@ def build_prompt(start_iso: str, end_iso: str, summary: Dict[str, Any]) -> str:
         "  * > 1: dynamic/fluctuating scene; mention repeated state transitions.\n"
         "  * >= 4: highly dynamic; describe as active fluctuations.\n"
         "- If evidence is weak or mixed, use cautious wording like likely/may.\n\n"
+        "Few-shot examples (style and length reference):\n\n"
+        "Example 1 — empty room:\n"
+        "Window: 2026-04-02T10:00:00+09:00 to 2026-04-02T10:00:30+09:00\n"
+        'status_counts: {"distance": {"far": 2}, "infrared": {"far": 2}, "motion": {"no_motion": 1}, '
+        '"activity": {"idle": 1}, "door": {"closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}\n'
+        "status_change_count: 0\n"
+        "Caption: The room appears empty with no occupancy evidence on any distance, infrared, motion, or activity sensor; "
+        "the door is closed, lighting is sufficient, and temperature is normal, so the scene is stable and no HVAC or lighting action is needed.\n\n"
+        "Example 2 — single person (study):\n"
+        "Window: 2026-04-02T14:30:00+09:00 to 2026-04-02T14:30:30+09:00\n"
+        'status_counts: {"distance": {"near": 1, "far": 1}, "infrared": {"near": 1, "far": 1}, "motion": {"no_motion": 1}, '
+        '"activity": {"idle": 1}, "door": {"closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}\n'
+        "status_change_count: 1\n"
+        "Caption: One occupant is likely present and stationary, with a single distance and infrared sensor reporting near while motion and activity remain idle, "
+        "consistent with focused desk work such as studying; the door is closed and the scene is mostly stable with comfortable lighting and temperature.\n\n"
+        "Example 3 — group (meeting):\n"
+        "Window: 2026-04-02T16:00:00+09:00 to 2026-04-02T16:00:30+09:00\n"
+        'status_counts: {"distance": {"near": 3, "far": 1}, "infrared": {"near": 3, "far": 1}, "motion": {"motion": 1}, '
+        '"activity": {"active": 2}, "door": {"open": 1, "closed": 1}, "light": {"indoor_light": 1}, "temperature": {"normal": 1}}\n'
+        "status_change_count: 5\n"
+        "Caption: Multiple occupants are likely present, with three distance and three infrared sensors reporting near alongside active motion and two active chairs, "
+        "consistent with a group gathering or meeting; a recent door-open event and a highly dynamic scene with frequent state transitions suggest people entering and interacting around the table.\n\n"
         f"Window: {start_iso} to {end_iso}\n"
         f"status_counts: {json.dumps(status_counts, ensure_ascii=False)}\n"
         f"status_change_count: {status_change_count}\n\n"
