@@ -98,6 +98,11 @@ RULE_SET_CATALOG: Dict[str, Dict[str, Any]] = {
         "target_agents": ["all"],
         "rule_files": ["rules/demo_rules/all-clean.ttl"],
     },
+    "clubhouse_repair_clean": {
+        "title": "Clubhouse repair-clean",
+        "target_agents": ["all"],
+        "rule_files": ["rules/demo_rules/repair-clean.ttl"],
+    },
     "clubhouse_back_read": {
         "title": "Clubhouse back-read",
         "target_agents": ["back"],
@@ -1787,6 +1792,7 @@ def make_handler(
                 clubhouse_rule_map = {
                     ("all", "normal"): "rules/demo_rules/all-normal.ttl",
                     ("all", "clean"): "rules/demo_rules/all-clean.ttl",
+                    ("all", "repair"): "rules/demo_rules/repair-clean.ttl",
                     ("back", "read"): "rules/demo_rules/back-read.ttl",
                     ("back", "nap"): "rules/demo_rules/back-nap.ttl",
                     ("front", "read"): "rules/demo_rules/front-read.ttl",
@@ -1895,6 +1901,12 @@ def main():
     parser.add_argument("--caption-model", default="qwenlm", help="Caption model name")
     parser.add_argument("--caption-gpus", type=int, default=1, help="GPUs for caption model init")
     parser.add_argument(
+        "--caption-gpu-id",
+        default="",
+        help="Pin this process to specific CUDA device(s) by setting CUDA_VISIBLE_DEVICES "
+             "(e.g. '0' or '0,1'). Empty = inherit from environment.",
+    )
+    parser.add_argument(
         "--visualization-file",
         default="index.html",
         help="Path to the 3D visualization HTML file",
@@ -1903,6 +1915,11 @@ def main():
     parser.add_argument("--embedding-model", default="jinaai/jina-clip-v1", help="Embedding model name")
     parser.add_argument("--disable-rag", action="store_true", help="Disable RAG chat endpoint")
     args = parser.parse_args()
+
+    # Must set CUDA_VISIBLE_DEVICES before the LLM stack initializes CUDA.
+    if args.caption_gpu_id:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.caption_gpu_id
+        logger.info("[3D] Pinned to CUDA_VISIBLE_DEVICES=%s", args.caption_gpu_id)
 
     html_path = (
         args.visualization_file

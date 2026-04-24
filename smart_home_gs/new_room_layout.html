@@ -805,6 +805,7 @@
         const RULE_TARGETS = {
           clubhouse_all_normal: ['all'],
           clubhouse_all_clean: ['all'],
+          clubhouse_repair_clean: ['all'],
           clubhouse_back_read: ['back'],
           clubhouse_back_nap: ['back'],
           clubhouse_front_read: ['front'],
@@ -815,6 +816,7 @@
         const RULE_LABELS = {
           clubhouse_all_normal: 'Clubhouse all-normal',
           clubhouse_all_clean: 'Clubhouse all-clean',
+          clubhouse_repair_clean: 'Clubhouse repair-clean',
           clubhouse_back_read: 'Clubhouse back-read',
           clubhouse_back_nap: 'Clubhouse back-nap',
           clubhouse_front_read: 'Clubhouse front-read',
@@ -827,7 +829,7 @@
           return aid;
         }
         function modeOptionsForAgent(aid) {
-          if (aid === 'all') return ['normal', 'clean'];
+          if (aid === 'all') return ['normal', 'clean', 'repair'];
           if (aid === 'back' || aid === 'front') return ['read', 'nap'];
           return [];
         }
