@@ -16,6 +16,12 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 
 logger = logging.getLogger(__name__)
 
+# Default Hue light IDs when no per-light override is provided in action parameters.
+# Matches the bridge's actually-existing lights (the previous range(0, 11) hit
+# non-existent IDs 0/4/9 silently).
+DEFAULT_LIGHT_IDS = ["1", "2", "3", "5", "6", "7", "8", "10"]
+
+
 class LightHueAgent(VirtualAgent):
     def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.55.82", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 0.1, 
@@ -493,58 +499,67 @@ class LightHueAgent(VirtualAgent):
             logger.warning(f"[{self.agent_id}] Failed to check light state, defaulting to 'off'")
             return "off"
 
-    def __turn_on_light(self):
-        # Replace with your bridge IP and API username
-        # NOTE(YH): hardcode for now
+    def __turn_on_light(self, light_ids=None):
         BRIDGE_IP = "143.248.55.137:10090"
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
-        # idx = self.agent_id.split("_")[-1]
-        
-        # logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
-        idxs = list(range(0, 11))
 
-        for idx in idxs:
-            url = f"{BASE_URL}/lights/{idx}/state"
-            data = json.dumps({"on": True}).encode("utf-8")
-            req = urllib.request.Request(url, data=data, method="PUT")
-            with urllib.request.urlopen(req) as response:
-                result = response.read().decode("utf-8")
-                ret = {
-                    "success": True,
-                    "message": f"Turned on light {self.agent_id}: {result}",
-                    "new_state": {
-                        "power": "on"
-                    }
-                }
-        return ret
-    
-    def __turn_off_light(self):
-        # Replace with your bridge IP and API username
-        # NOTE(YH): hardcode for now
+        ids = [str(x) for x in light_ids] if light_ids else list(DEFAULT_LIGHT_IDS)
+        successes, failures = [], []
+        for idx in ids:
+            try:
+                url = f"{BASE_URL}/lights/{idx}/state"
+                data = json.dumps({"on": True}).encode("utf-8")
+                req = urllib.request.Request(url, data=data, method="PUT")
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    response.read()
+                successes.append(idx)
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] Error turning ON light {idx}: {e}")
+                failures.append(f"{idx}({e})")
+
+        if not failures:
+            return {
+                "success": True,
+                "message": f"Turned ON lights {successes}",
+                "new_state": {"power": "on"},
+            }
+        return {
+            "success": bool(successes),
+            "message": f"Turn ON partial: success={successes}, failed={failures}",
+            "new_state": {"power": "on" if successes else "off"},
+        }
+
+    def __turn_off_light(self, light_ids=None):
         BRIDGE_IP = "143.248.55.137:10090"
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
-        # idx = self.agent_id.split("_")[-1]
 
-        # logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
+        ids = [str(x) for x in light_ids] if light_ids else list(DEFAULT_LIGHT_IDS)
+        successes, failures = [], []
+        for idx in ids:
+            try:
+                url = f"{BASE_URL}/lights/{idx}/state"
+                data = json.dumps({"on": False}).encode("utf-8")
+                req = urllib.request.Request(url, data=data, method="PUT")
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    response.read()
+                successes.append(idx)
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] Error turning OFF light {idx}: {e}")
+                failures.append(f"{idx}({e})")
 
-        idxs = list(range(0, 11))
-
-        for idx in idxs:
-            url = f"{BASE_URL}/lights/{idx}/state"
-            data = json.dumps({"on": False}).encode("utf-8")
-            req = urllib.request.Request(url, data=data, method="PUT")
-            with urllib.request.urlopen(req) as response:
-                result = response.read().decode("utf-8")
-                ret = {
-                    "success": True,
-                    "message": f"Turned off light {self.agent_id}: {result}",
-                    "new_state": {
-                        "power": "off"
-                    }
-                }
-        return ret
+        if not failures:
+            return {
+                "success": True,
+                "message": f"Turned OFF lights {successes}",
+                "new_state": {"power": "off"},
+            }
+        return {
+            "success": bool(successes),
+            "message": f"Turn OFF partial: success={successes}, failed={failures}",
+            "new_state": {"power": "off" if successes else "on"},
+        }
 
     def __verify_action_result(self, expected_state: str, max_retries: int = 2, retry_delay: float = 0.2) -> tuple:
         """
@@ -608,11 +623,21 @@ class LightHueAgent(VirtualAgent):
         # Check if verification should be skipped for faster response
         # For manual commands or when explicitly disabled
         skip_verification = action_payload.parameters and action_payload.parameters.get("skip_verification", False)
-        
-        try:            
+
+        # Optional per-light targeting: when present, iterate exactly those Hue IDs
+        # instead of the default DEFAULT_LIGHT_IDS list.
+        params = action_payload.parameters if isinstance(action_payload.parameters, dict) else {}
+        raw_light_ids = params.get("light_ids")
+        light_ids_override = (
+            [str(x) for x in raw_light_ids]
+            if isinstance(raw_light_ids, list) and raw_light_ids
+            else None
+        )
+
+        try:
             if action_payload.actionName == "turn_on":
                 # Execute the physical action first
-                result = self.__turn_on_light()
+                result = self.__turn_on_light(light_ids_override)
                 
                 if skip_verification:
                     # Skip verification for faster response
@@ -647,7 +672,7 @@ class LightHueAgent(VirtualAgent):
                 
             elif action_payload.actionName == "turn_off":
                 # Execute the physical action first
-                result = self.__turn_off_light()
+                result = self.__turn_off_light(light_ids_override)
                 
                 if skip_verification:
                     # Skip verification for faster response

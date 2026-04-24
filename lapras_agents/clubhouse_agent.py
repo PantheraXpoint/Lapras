@@ -671,26 +671,128 @@ class ClubHouseAgent(VirtualAgent):
                     "success": False,
                     "message": f"Could not find light group: {self.light_group}"
                 }
-            
+
             url = f"{self.BASE_URL}/groups/{group_id}/action"
             data = json.dumps({"on": False}).encode("utf-8")
             req = urllib.request.Request(url, data=data, method="PUT")
-            
+
             with urllib.request.urlopen(req, timeout=10) as response:
                 result = response.read().decode("utf-8")
-                
+
             return {
                 "success": True,
                 "message": f"Turned off {self.light_group} lights: {result}",
                 "new_state": {"light_power": "off"}
             }
-            
+
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error turning off lights: {e}")
             return {
                 "success": False,
                 "message": f"Error turning off lights: {str(e)}"
             }
+
+    # Bridge inventory used for reconciliation in __turn_on_lights_by_ids.
+    # When the rule specifies a subset, any KNOWN light not in the subset is
+    # turned OFF so switching between different light_ids sets produces a
+    # visible delta instead of leaving stale lights on.
+    KNOWN_HUE_LIGHTS = ("1", "2", "3", "5", "6", "7", "8", "10")
+
+    def __turn_on_lights_by_ids(self, light_ids):
+        """Turn on a specific list of Hue lights, applying preset light_settings.
+
+        Also turns OFF any KNOWN_HUE_LIGHTS not in the target set so the result
+        is exactly {light_ids} on, all others off — necessary for the failover
+        demo where switching rule subsets must be visually obvious.
+        """
+        target_set = {str(x) for x in light_ids}
+        excluded = [lid for lid in self.KNOWN_HUE_LIGHTS if lid not in target_set]
+
+        # Step 1: turn OFF lights that should not be in the new subset.
+        for lid in excluded:
+            try:
+                url = f"{self.BASE_URL}/lights/{lid}/state"
+                data = json.dumps({"on": False}).encode("utf-8")
+                req = urllib.request.Request(url, data=data, method="PUT")
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    response.read()
+                logger.info(f"[{self.agent_id}] Excluded light {lid} turned OFF (not in target subset)")
+            except Exception as e:
+                logger.warning(f"[{self.agent_id}] Could not turn OFF excluded light {lid}: {e}")
+
+        # Step 2: turn ON target lights with preset settings.
+        # effect:none cancels any lingering effect (colorloop, alert) so a
+        # previously-on light receives the new color cleanly. transitiontime:0
+        # makes the change immediate.
+        on_payload = dict(self.light_settings)
+        on_payload["effect"] = "none"
+        on_payload["transitiontime"] = 0
+
+        successes, failures = [], []
+        for raw_id in light_ids:
+            light_id = str(raw_id)
+            try:
+                url = f"{self.BASE_URL}/lights/{light_id}/state"
+                data = json.dumps(on_payload).encode("utf-8")
+                req = urllib.request.Request(url, data=data, method="PUT")
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    response.read()
+                successes.append(light_id)
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] Error turning ON light {light_id}: {e}")
+                failures.append(f"{light_id}({e})")
+
+        if not failures:
+            return {
+                "success": True,
+                "message": f"Turned ON lights {successes} (excluded OFF: {excluded})",
+                "new_state": {"light_power": "on"},
+            }
+        if successes:
+            return {
+                "success": False,
+                "message": f"Partial ON: success={successes}, failed={failures}, excluded OFF: {excluded}",
+                "new_state": {"light_power": "partial"},
+            }
+        return {
+            "success": False,
+            "message": f"All target lights failed to turn ON: {failures}",
+            "new_state": {"light_power": "off"},
+        }
+
+    def __turn_off_lights_by_ids(self, light_ids):
+        """Turn off a specific list of Hue lights."""
+        successes, failures = [], []
+        for raw_id in light_ids:
+            light_id = str(raw_id)
+            try:
+                url = f"{self.BASE_URL}/lights/{light_id}/state"
+                data = json.dumps({"on": False}).encode("utf-8")
+                req = urllib.request.Request(url, data=data, method="PUT")
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    response.read()
+                successes.append(light_id)
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] Error turning OFF light {light_id}: {e}")
+                failures.append(f"{light_id}({e})")
+
+        if not failures:
+            return {
+                "success": True,
+                "message": f"Turned OFF lights {successes}",
+                "new_state": {"light_power": "off"},
+            }
+        if successes:
+            return {
+                "success": False,
+                "message": f"Partial OFF: success={successes}, failed={failures}",
+                "new_state": {"light_power": "partial"},
+            }
+        return {
+            "success": False,
+            "message": f"All target lights failed to turn OFF: {failures}",
+            "new_state": {"light_power": "on"},
+        }
     
     def __get_group_id_by_name(self, group_name):
         """Get group ID by name."""
@@ -924,9 +1026,28 @@ class ClubHouseAgent(VirtualAgent):
     def _change_mode(self, new_mode: str) -> dict:
         """Change the agent's mode (nap, read, normal, clean) and reconfigure settings."""
         try:
-            position, _ = self._extract_position_mode()
+            position, current_mode = self._extract_position_mode()
             if position == "unknown":
                 position = "back"
+
+            # Short-circuit when the requested mode matches the current one.
+            # Rule switches within the same profile (e.g. repair-clean → failure-clean →
+            # failover-clean, all "clean") otherwise trigger __turn_on_lights() here,
+            # which issues a group call that momentarily lights EVERY member of the
+            # Hue group — including lights the new rule excludes. Skipping the reapply
+            # lets the subsequent rule evaluation drive lighting via
+            # __turn_on_lights_by_ids, which reconciles to exactly the rule's light_ids.
+            if new_mode == current_mode:
+                logger.info(
+                    f"[{self.agent_id}] change_mode('{new_mode}') is a no-op "
+                    f"(already in mode '{current_mode}'); skipping profile reapply "
+                    f"so rule's light_ids drives lighting."
+                )
+                return {
+                    "success": True,
+                    "message": f"Already in mode '{new_mode}'; reapply skipped",
+                    "new_state": self._build_mode_state_fields(),
+                }
 
             old_preset_mode = self.preset_mode
             if position == "all":
@@ -1020,9 +1141,32 @@ class ClubHouseAgent(VirtualAgent):
                         "new_state": {},
                     }
 
+                # Optional per-light targeting from rule decision or manual command.
+                # When absent, the existing group-based path runs unchanged.
+                raw_light_ids = params.get("light_ids")
+                light_ids_override = (
+                    [str(x) for x in raw_light_ids]
+                    if isinstance(raw_light_ids, list) and raw_light_ids
+                    else None
+                )
+
+                def _light_on():
+                    return (
+                        self.__turn_on_lights_by_ids(light_ids_override)
+                        if light_ids_override is not None
+                        else self.__turn_on_lights()
+                    )
+
+                def _light_off():
+                    return (
+                        self.__turn_off_lights_by_ids(light_ids_override)
+                        if light_ids_override is not None
+                        else self.__turn_off_lights()
+                    )
+
                 turning_on = action_payload.actionName == "turn_on"
                 if target == "both":
-                    light_result = self.__turn_on_lights() if turning_on else self.__turn_off_lights()
+                    light_result = _light_on() if turning_on else _light_off()
                     aircon_result = self.__turn_on_aircon() if turning_on else self.__turn_off_aircon()
                     overall_success = bool(light_result.get("success")) and bool(aircon_result.get("success"))
                     with self.state_lock:
@@ -1050,7 +1194,7 @@ class ClubHouseAgent(VirtualAgent):
                     return result
 
                 if target == "light":
-                    sub_result = self.__turn_on_lights() if turning_on else self.__turn_off_lights()
+                    sub_result = _light_on() if turning_on else _light_off()
                     state_key = "light_power"
                 else:
                     sub_result = self.__turn_on_aircon() if turning_on else self.__turn_off_aircon()
