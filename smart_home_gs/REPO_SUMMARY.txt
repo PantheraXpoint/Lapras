@@ -1,0 +1,241 @@
+================================================================================
+  LAPRAS++ Smart Home Ground Station — Repository Summary
+================================================================================
+
+1. WHAT THIS REPO DOES
+================================================================================
+
+This is a real-time 3D sensor visualization and monitoring system for smart
+spaces, part of the LAPRAS++ framework. It provides:
+
+  - Live 3D visualization of IoT sensor data using A-Frame (WebXR/3D framework)
+  - Real-time MQTT sensor data subscription and rendering
+  - AI-powered natural language captions describing sensor activities (via LLMs)
+  - Interactive dashboard for controlling smart room devices (lights, AC)
+  - Sensor stream logging for historical analysis
+  - Multi-room support (N1 Lab, Living Room)
+  - Rule-based automation with multiple operating modes
+  - Threshold-based triggering and sensor configuration UI
+
+Supported sensor types:
+  distance, infrared, motion, activity, temperature, light, door, tilt
+
+
+2. REPOSITORY STRUCTURE
+================================================================================
+
+smart_home_gs/
+│
+├── Python Entry Points:
+│   ├── start_3d_visualization_stream.py       # MAIN: live MQTT -> 3D viz server
+│   ├── start_3d_visualization_simulated_stream.py  # Simulated mode (no MQTT)
+│   ├── sensor_stream_logger.py                # Log MQTT stream to JSON
+│   ├── sensor_caption_infer.py                # Generate captions from logs
+│   ├── generate_three_case_captions.py        # Test captions with 3 scenarios
+│   └── inspect_caption_prompt_input.py        # Debug caption prompt generation
+│
+├── Frontend / Visualization:
+│   ├── index.html                             # Room selection dashboard
+│   ├── visualize_smart_room_aframe.html       # Main 3D visualization page
+│   └── new_room_layout.html                   # Alternative room layout
+│
+├── Room Configuration:
+│   ├── smart_room.xml                         # N1 Lab room definition (5m x 6m)
+│   └── new_smart_room.xml                     # Alternative room definition
+│
+├── assets/                                    # 200+ 3D furniture models (.glb)
+├── aframe/                                    # A-Frame WebXR framework (v1.7.1)
+├── logs/                                      # MQTT stream logs & captions
+└── .gitignore
+
+
+3. HOW IT WORKS — ARCHITECTURE & DATA FLOW
+================================================================================
+
+  ┌─────────────────────────────────┐
+  │  MQTT Broker (143.248.55.82)    │   IoT sensors publish data
+  │  Topic: virtual/+/to/context/   │
+  │         updateContext            │
+  └──────────────┬──────────────────┘
+                 │
+                 ▼
+  ┌─────────────────────────────────┐
+  │  Python Backend                 │
+  │  (start_3d_visualization_       │
+  │   stream.py)                    │
+  │                                 │
+  │  Components:                    │
+  │  - LiveSensorStore: merges      │
+  │    per-agent sensor data        │
+  │  - DashboardOpsClient: MQTT     │
+  │    command publishing           │
+  │  - LiveCaptionEngine: LLM-based │
+  │    30-sec window captioning     │
+  └──────────────┬──────────────────┘
+                 │
+                 ▼
+  ┌─────────────────────────────────┐
+  │  HTTP Server (port 8888)        │
+  │                                 │
+  │  API Endpoints:                 │
+  │  GET  /api/latest               │  → sensor snapshot JSON
+  │  GET  /api/control/capabilities │  → available agents & controls
+  │  POST /api/control/command      │  → send command to MQTT
+  │  POST /api/control/mode/command │  → switch manual/automated
+  │  POST /api/rules/command        │  → load rule files
+  │  POST /api/threshold/command    │  → set thresholds
+  │  POST /api/sensor/config/command│  → configure sensors
+  │  GET  /                         │  → 3D visualization page
+  └──────────────┬──────────────────┘
+                 │
+                 ▼
+  ┌─────────────────────────────────┐
+  │  Web Frontend (Browser)         │
+  │  - A-Frame / Three.js 3D room  │
+  │  - Real-time sensor HUD        │
+  │  - Device control panel         │
+  │  - LLM caption display          │
+  └─────────────────────────────────┘
+
+Data flow:
+  1. MQTT messages arrive from IoT agents (clubhouse, aircon, hue_light, etc.)
+  2. LiveSensorStore merges per-agent sensor data with 20-second TTL
+  3. Data is flattened into key-value pairs (e.g., "distance_1" -> "near")
+  4. LiveCaptionEngine buffers 30-sec windows and generates LLM captions
+  5. Frontend polls /api/latest and renders 3D scene + sensor overlays
+
+
+4. KEY TECHNOLOGIES
+================================================================================
+
+  Python 3          Backend logic, HTTP server, MQTT client
+  Paho MQTT         IoT messaging (QoS=1)
+  A-Frame v1.7.1    WebXR / VR 3D framework
+  Three.js          3D rendering (via A-Frame)
+  QwenLM            LLM for natural language captions (configurable)
+  HTML5/CSS3/JS     Frontend UI
+  XML               Room configuration format
+  GLB/GLTF          3D model format for furniture assets
+
+
+5. HOW TO RUN
+================================================================================
+
+Prerequisites:
+  - Python 3.7+
+  - paho-mqtt        (pip install paho-mqtt)
+  - llms package     (from parent LAPRAS workspace — provides init_model)
+  - lapras_middleware (from parent LAPRAS workspace — event structures)
+  - Access to MQTT broker (default: 143.248.55.82:1883)
+  - LLM model installed (QwenLM by default)
+
+--- Option A: Live Mode (requires MQTT broker + sensors) ---
+
+  python3 start_3d_visualization_stream.py \
+    --mqtt-broker 143.248.55.82 \
+    --mqtt-port 1883 \
+    --http-port 8888 \
+    --model qwenlm \
+    --gpus 1 \
+    --caption-window-sec 30
+
+  Then open: http://localhost:8888
+
+--- Option B: Simulated Mode (no MQTT needed) ---
+
+  python3 start_3d_visualization_simulated_stream.py \
+    --http-port 8888
+
+  Generates synthetic sensor data cycling through 3 scenarios.
+  Then open: http://localhost:8888
+
+--- Option C: Log Sensor Stream ---
+
+  python3 sensor_stream_logger.py \
+    --minutes 5 \
+    --broker 143.248.55.82 \
+    --output logs/my_stream.json
+
+--- Option D: Generate Captions from Logged Data ---
+
+  python3 sensor_caption_infer.py \
+    --input logs/sensor_stream_20260330_194218.json \
+    --output logs/captions.json \
+    --model qwenlm \
+    --window-sec 30
+
+--- Option E: Test Captions with 3 Fixed Cases ---
+
+  python3 generate_three_case_captions.py \
+    --model qwenlm \
+    --gpus 1
+
+--- Option F: Inspect/Debug Caption Prompt ---
+
+  python3 inspect_caption_prompt_input.py \
+    --mqtt-broker 143.248.55.82 \
+    --collect-sec 12
+
+
+6. MQTT TOPIC STRUCTURE
+================================================================================
+
+  Subscription:   virtual/+/to/context/updateContext
+  Control:        dashboard/control/command & result
+  Mode:           dashboard/control/mode/command & result
+  Rules:          context/rules/command & result
+  Thresholds:     dashboard/threshold/command & result
+  Sensor config:  dashboard/sensor/config/command & result
+
+
+7. CONTROL AGENTS
+================================================================================
+
+  Clubhouse agents:  "all", "back", "front"  (unified light+AC control)
+  Split agents:      "aircon", "hue_light"    (separate control)
+  Dashboard agent:   metadata/state only
+
+
+8. RAG CHAT (VQA)
+================================================================================
+
+The chat panel supports RAG-based question answering over historical sensor
+captions stored in Milvus (vector DB). Supported query types:
+
+  - Time-range: "What happened between 10am and 11am on April 2?"
+  - Semantic:   "Was the AC on this afternoon?"
+  - Event search: "When was there a meeting?" (returns time intervals)
+  - Hybrid:     time range + semantic question combined
+
+--- Setup ---
+
+  1. Install RAG dependencies:
+     pip install -r requirements-rag.txt
+
+  2. Backfill existing caption logs into Milvus:
+     python3 index_captions_to_milvus.py --logs-dir logs/
+
+  3. Start the server normally. The chat panel is now live.
+     New captions are automatically indexed in real-time.
+
+--- Test queries (curl) ---
+
+  curl -X POST http://localhost:8888/api/chat \
+    -H 'Content-Type: application/json' \
+    -d '{"message":"what happened between 10 and 11 am on April 2 2026","room_id":"n1_lab"}'
+
+  curl -X POST http://localhost:8888/api/chat \
+    -H 'Content-Type: application/json' \
+    -d '{"message":"when was there a meeting?","room_id":"n1_lab"}'
+
+  curl -X POST http://localhost:8888/api/chat \
+    -H 'Content-Type: application/json' \
+    -d '{"message":"was the room empty this morning?","room_id":"n1_lab"}'
+
+--- CLI flags ---
+
+  --milvus-db-path   Milvus Lite DB file path (default: ./data/captions.db)
+  --embedding-model  Embedding model name (default: jinaai/jina-clip-v1)
+  --disable-rag      Disable RAG chat endpoint (returns 503)
+
+================================================================================
