@@ -231,7 +231,17 @@ class ContextRuleManager:
             return "hue" in base and "light" in base
         if canonical == "aircon":
             return "aircon" in base
-        if canonical in {"all", "back", "front"}:
+        if canonical == "all":
+            if "all" in base:
+                return True
+            # Demo failure/repair rules (and LLM-generated failover files) target
+            # the "all" agent but don't carry "all" in the filename — e.g.
+            # repair-clean.ttl, failure-clean.ttl, failover-clean.ttl,
+            # repair-clean-restored.ttl. The SPARQL hasAgent filter in
+            # evaluate_rules still enforces correctness, so widening the heuristic
+            # here only risks redundant evaluation, never misrouted actions.
+            return "repair" in base or "failover" in base or "failure" in base
+        if canonical in {"back", "front"}:
             return canonical in base
         return False
 
@@ -763,7 +773,15 @@ class ContextRuleManager:
             raw_power_decision = raw_rule_decision.get("power")
             current_power_state = current_state.get("power", "off")
 
-            logger.info(f"[{self.service_id}] 🔍 DEBUG: Raw rule decision for '{agent_id}': power={raw_power_decision}")
+            # Optional per-light targeting carried by the rule's hasStateUpdate JSON.
+            # When present, forwarded as action parameters so the virtual agent iterates
+            # exactly those Hue lights instead of using its default group.
+            rule_light_ids = raw_rule_decision.get("light_ids")
+            action_params: Optional[Dict[str, Any]] = None
+            if isinstance(rule_light_ids, list) and rule_light_ids:
+                action_params = {"light_ids": [str(x) for x in rule_light_ids]}
+
+            logger.info(f"[{self.service_id}] 🔍 DEBUG: Raw rule decision for '{agent_id}': power={raw_power_decision}, light_ids={rule_light_ids}")
             logger.info(f"[{self.service_id}] 🔍 DEBUG: Current power state for '{agent_id}': {current_power_state}")
 
             # Apply extended window logic to prevent rapid on/off switching
@@ -774,9 +792,28 @@ class ContextRuleManager:
             if final_power_decision != current_power_state:
                 logger.info(f"[{self.service_id}] 🚨 ACTION NEEDED for '{agent_id}': {current_power_state} → {final_power_decision}")
                 if final_power_decision == "on":
-                    self._send_action_command(agent_id, "turn_on")
+                    self._send_action_command(agent_id, "turn_on", parameters=action_params)
                 elif final_power_decision == "off":
-                    self._send_action_command(agent_id, "turn_off")
+                    self._send_action_command(agent_id, "turn_off", parameters=action_params)
+            elif final_power_decision == "on" and action_params is not None:
+                # Power stays 'on' but the rule's light_ids (or other per-light params)
+                # may have changed from the last dispatched action — e.g. switching
+                # repair-clean → failover-clean while lights are already on. Without
+                # this branch the dispatch path sees no power transition and skips,
+                # leaving the old light subset active. We re-send only when params
+                # actually differ from the last command, so steady-state doesn't spam.
+                with self.action_command_lock:
+                    last_cmd = self.last_action_commands.get(agent_id) or {}
+                last_action_name = last_cmd.get("action_name")
+                last_params = last_cmd.get("parameters")
+                if last_action_name != "turn_on" or last_params != action_params:
+                    logger.info(
+                        f"[{self.service_id}] 🔁 PARAMS CHANGED for '{agent_id}': "
+                        f"last={last_params} → new={action_params}; re-dispatching turn_on to reconcile"
+                    )
+                    self._send_action_command(agent_id, "turn_on", parameters=action_params)
+                else:
+                    logger.debug(f"[{self.service_id}] ✅ NO ACTION: same power and same params for agent '{agent_id}'")
             else:
                 logger.debug(f"[{self.service_id}] ✅ NO ACTION: No state change needed for agent '{agent_id}' (already {current_power_state})")
 
@@ -1330,32 +1367,51 @@ class ContextRuleManager:
     def _detect_and_apply_modes_from_rules(self, rule_file_paths: List[str]) -> None:
         """Detect agent modes from rule filenames and send change_mode commands."""
         import os
-        
+
         mode_commands = {}  # agent_id -> mode
-        
+
         for rule_file in rule_file_paths:
             try:
                 # Extract filename without path and extension
                 filename = os.path.basename(rule_file)
                 name_without_ext = os.path.splitext(filename)[0]
-                
+
+                # Special-case failover/repair/failure rules for the 'all' agent.
+                # These don't follow the strict position-mode naming convention
+                # (e.g. repair-clean.ttl, failure-clean.ttl, failover-clean.ttl,
+                # repair-clean-restored.ttl) but visually they should use the same
+                # 'clean' light profile as all-clean.ttl so the color matches
+                # during the demo.
+                lower_name = name_without_ext.lower()
+                if "clean" in lower_name and (
+                    lower_name.startswith("repair-")
+                    or lower_name.startswith("failover-")
+                    or lower_name.startswith("failure-")
+                ):
+                    mode_commands["all"] = "clean"
+                    logger.info(
+                        f"[{self.service_id}] Detected mode change needed: all → clean "
+                        f"(from {rule_file}, failover/repair/failure special-case)"
+                    )
+                    continue
+
                 # Parse filename format: position-mode.ttl (e.g., back-nap.ttl, front-read.ttl)
                 if '-' in name_without_ext:
                     parts = name_without_ext.split('-')
                     if len(parts) == 2:
                         position, mode = parts
-                        
+
                         # Map position to agent_id
                         if position in ['back', 'front', 'all']:
                             agent_id = position
-                            
+
                             # Validate mode for position
                             valid_modes = {
                                 'back': ['nap', 'read'],
-                                'front': ['nap', 'read'], 
+                                'front': ['nap', 'read'],
                                 'all': ['normal', 'clean']
                             }
-                            
+
                             if mode in valid_modes.get(position, []):
                                 mode_commands[agent_id] = mode
                                 logger.info(f"[{self.service_id}] Detected mode change needed: {agent_id} → {mode} (from {rule_file})")
@@ -1487,6 +1543,12 @@ class ContextRuleManager:
             self._detect_and_apply_modes_from_rules(successfully_loaded)
         
         return results
+
+    def load_rules_from_content(self, rule_content: str, virtual_path: str) -> None:
+        """Load rules from inline TTL content; virtual_path is used only for filename heuristics."""
+        self.rules_graph.parse(data=rule_content, format="turtle")
+        self.loaded_rule_files.add(virtual_path)
+        logger.info(f"[{self.service_id}] Loaded inline rules (virtual_path={virtual_path})")
 
     def get_loaded_rule_files(self) -> List[str]:
         """Get list of currently loaded rule files."""
@@ -1757,7 +1819,43 @@ class ContextRuleManager:
                         logger.info(f"[{self.service_id}] PRESET SWITCH: {old_files} → {preset_name} ({loaded_files})")
                     except Exception as e:
                         message = f"Error switching to preset '{preset_name}': {str(e)}"
-                
+            elif command_action == "apply_inline":
+                rule_content = event.payload.get("rule_content", "")
+                virtual_path = event.payload.get("virtual_path", "")
+                if not rule_content or not virtual_path:
+                    message = "apply_inline requires non-empty rule_content and virtual_path"
+                elif event.payload.get("preset_name") or event.payload.get("rule_files"):
+                    message = "apply_inline does not accept preset_name or rule_files fields"
+                else:
+                    try:
+                        old_files = list(self.loaded_rule_files)
+                        self.clear_rules()
+
+                        # Treat simulator demo sources the same as sensor-3d-ui: preserve
+                        # extended windows so we don't force fast-response across all agents.
+                        demo_sim_source = source_entity_id in (
+                            "simulate-light-failure", "simulate-light-repair"
+                        )
+                        if not (demo_ui_source or demo_sim_source):
+                            with self.extended_window_lock:
+                                self.extended_window_agents.clear()
+                        else:
+                            logger.info(
+                                f"[{self.service_id}] Demo source apply_inline: preserving existing extended windows"
+                            )
+
+                        self.load_rules_from_content(rule_content, virtual_path)
+                        self._detect_and_apply_modes_from_rules([virtual_path])
+                        self._apply_rules_immediately_for_known_agents("apply_inline")
+
+                        success = True
+                        message = f"Successfully applied inline rule (virtual_path={virtual_path})"
+                        logger.info(
+                            f"[{self.service_id}] INLINE APPLY: {old_files} → [{virtual_path}]"
+                        )
+                    except Exception as e:
+                        message = f"Error applying inline rule: {str(e)}"
+
             else:
                 message = f"Unknown rules command action: {command_action}"
 
