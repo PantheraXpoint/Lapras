@@ -244,6 +244,7 @@ def _synthesize_time_range(llm, query: str, rows: List[Dict[str, Any]]) -> str:
     )
     response = llm.generate_response({"text": prompt}, max_new_tokens=512, temperature=0.3)
     return (response or "No matching activity was recorded.").strip()
+    # return (response or "Error").strip()
 
 
 def _synthesize_semantic(llm, query: str, rows: List[Dict[str, Any]]) -> str:
