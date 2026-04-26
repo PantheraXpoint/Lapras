@@ -455,7 +455,7 @@ class LightHueAgent(VirtualAgent):
         
         try:
             # Check the state of all lights (0-10)
-            idxs = list(range(0, 8))
+            idxs = list(range(0, 11))
             lights_on = 0
             total_lights = 0
             
