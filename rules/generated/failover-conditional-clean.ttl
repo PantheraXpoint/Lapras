@@ -1,0 +1,77 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- All Area Failover-Conditional-Clean Mode Rules ---
+# Conditional failover for agent_id "all" after light "3" failed:
+#
+#   proximity_status=near AND infrared_1_proximity_status=near
+#       -> 6 lights, replacement "7" INCLUDED  (["1","2","5","7","8","10"])
+#   proximity_status=near AND infrared_1_proximity_status=far
+#       -> 5 lights, replacement "7" EXCLUDED  (["1","2","5","8","10"])
+#   proximity_status=far
+#       -> lights off
+#
+# Decoupling from the unconditional failover-clean.ttl: there, replacement "7"
+# is always added once near. Here, "7" only joins the active set when the
+# infrared_1 sensor itself reports near, so the replacement tracks the
+# specific sensor whose coverage area was lost when light "3" failed.
+#
+# Aircon config: both devices 164793 & 322207, both OFF always (clean mode).
+#
+# Requires the clubhouse_agent to expose `infrared_1_proximity_status` in
+# local_state (per-sensor proximity for sensor_id == "infrared_1"). Until
+# that key is published, the near-branch conditions evaluate to false and
+# only the far-branch OFF rule fires.
+
+# ON branch A — near + infrared_1=near: include replacement "7" (6 lights)
+lapras:AllCleanFailoverOnIR1NearRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanFailoverIsNearCondition ;
+    lapras:hasCondition lapras:AllCleanFailoverIR1NearCondition ;
+    lapras:hasAction lapras:SetAllCleanFailoverPowerOnSix .
+
+# ON branch B — near + infrared_1=far: exclude replacement "7" (5 lights)
+lapras:AllCleanFailoverOnIR1FarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanFailoverIsNearCondition ;
+    lapras:hasCondition lapras:AllCleanFailoverIR1FarCondition ;
+    lapras:hasAction lapras:SetAllCleanFailoverPowerOnFive .
+
+lapras:AllCleanFailoverIsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:AllCleanFailoverIR1NearCondition
+    lapras:hasSensor "infrared_1_proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:AllCleanFailoverIR1FarCondition
+    lapras:hasSensor "infrared_1_proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetAllCleanFailoverPowerOnSix lapras:hasStateUpdate '{"power": "on", "light_ids": ["1","2","5","7","8","10"]}' .
+lapras:SetAllCleanFailoverPowerOnFive lapras:hasStateUpdate '{"power": "on", "light_ids": ["1","2","5","8","10"]}' .
+
+# OFF branch — proximity=far: turn lights off
+lapras:AllCleanFailoverOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanFailoverIsOnCondition ;
+    lapras:hasCondition lapras:AllCleanFailoverIsFarCondition ;
+    lapras:hasAction lapras:SetAllCleanFailoverPowerOff .
+
+lapras:AllCleanFailoverIsOnCondition
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:AllCleanFailoverIsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetAllCleanFailoverPowerOff lapras:hasStateUpdate '{"power": "off", "light_ids": ["1","2","5","8","10"]}' .

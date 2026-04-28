@@ -1,0 +1,55 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- All Area Failure-Clean Mode Rules (demo intermediate state) ---
+# For agent_id "all" - 5-light coverage; light "3" has FAILED and been removed.
+# Active light_ids: ["1","2","5","8","10"]
+# Reserved backups (still available): "6", "7"
+# Aircon config: both devices 164793 & 322207, both OFF always (clean mode behavior)
+#
+# This is the static intermediate rule used by simulate_light_failure.py:
+#   step 1 — switch to this rule (visible: light 3 goes dark, 5 lights remain)
+#   step 2 — LLM generates failover-clean.ttl that adds replacement "7" back
+
+# Turn ON lights only when person is near (clean mode - aircons stay OFF).
+# Note: no IsOffCondition precondition — fires on every proximity=near update
+# so switching from a different light_ids subset yields an immediate visible
+# reconciliation. The agent's __turn_on_lights_by_ids turns off any KNOWN
+# light not in light_ids, so re-fires don't cause flicker.
+lapras:AllCleanOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanIsNearCondition ;
+    lapras:hasAction lapras:SetAllCleanPowerOn .
+
+lapras:AllCleanIsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:AllCleanIsOffCondition
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:SetAllCleanPowerOn lapras:hasStateUpdate '{"power": "on", "light_ids": ["1","2","5","7","8","10"]}' .
+
+# Turn OFF lights when person is far
+lapras:AllCleanOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanIsOnCondition ;
+    lapras:hasCondition lapras:AllCleanIsFarCondition ;
+    lapras:hasAction lapras:SetAllCleanPowerOff .
+
+lapras:AllCleanIsOnCondition
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:AllCleanIsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetAllCleanPowerOff lapras:hasStateUpdate '{"power": "off", "light_ids": ["1","2","5","7","8","10"]}' .
