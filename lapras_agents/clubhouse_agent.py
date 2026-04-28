@@ -69,6 +69,16 @@ class ClubHouseAgent(VirtualAgent):
         
         self.sensor_config = sensor_config
         self.supported_sensor_types = ["infrared", "distance", "motion", "activity", "light", "temperature", "door"]
+
+        # Dynamic threshold configuration for sensor classification
+        self.light_threshold_config = {
+            "threshold": 1000.0,  # lux; above = bright, below = dark
+            "last_update": time.time()
+        }
+        self.temperature_threshold_config = {
+            "threshold": 25.0,  # °C; above = hot, below = cool
+            "last_update": time.time()
+        }
         
         # Hue Bridge configuration
         self.BRIDGE_IP = "143.248.55.137:10090"
@@ -89,7 +99,8 @@ class ClubHouseAgent(VirtualAgent):
         self.local_state.update({
             "power": "off",
             "proximity_status": "unknown",
-            "motion_status": "unknown", 
+            "infrared_1_proximity_status": "unknown",
+            "motion_status": "unknown",
             "activity_status": "unknown",
             "activity_detected": False,
             "light_status": "unknown",
@@ -97,6 +108,8 @@ class ClubHouseAgent(VirtualAgent):
             "door_status": "unknown",
             "light_power": "off",
             "aircon_power": "off",
+            "light_threshold": self.light_threshold_config["threshold"],
+            "temp_threshold": self.temperature_threshold_config["threshold"],
             **self._build_mode_state_fields(),
         })
         
@@ -359,7 +372,14 @@ class ClubHouseAgent(VirtualAgent):
             if not sensor_payload.metadata or "proximity_status" not in sensor_payload.metadata:
                 logger.warning(f"[{self.agent_id}] No proximity_status in infrared sensor metadata")
                 return
-                
+
+            # Track infrared_1-specific proximity status for conditional rule evaluation
+            if sensor_id == "infrared_1":
+                ir1_status = sensor_payload.metadata.get("proximity_status", "unknown")
+                if self.local_state.get("infrared_1_proximity_status") != ir1_status:
+                    self.local_state["infrared_1_proximity_status"] = ir1_status
+                    logger.info(f"[{self.agent_id}] Updated infrared_1_proximity_status to: {ir1_status}")
+
             # Update global proximity status (consider both infrared and distance sensors)
             proximity_detected = any(
                 sensor_info.get("metadata", {}).get("proximity_status") == "near"
@@ -471,7 +491,7 @@ class ClubHouseAgent(VirtualAgent):
 
             try:
                 lux_value = float(sensor_payload.value)
-                light_status = "dark" if lux_value < 1000 else "bright"  # Simple threshold
+                light_status = "dark" if lux_value < self.light_threshold_config["threshold"] else "bright"
                 
                 if self.local_state.get("light_status") != light_status:
                     self.local_state["light_status"] = light_status
@@ -494,7 +514,7 @@ class ClubHouseAgent(VirtualAgent):
 
             try:
                 temp_value = float(sensor_payload.value)
-                temp_status = "hot" if temp_value > 25 else "cool"  # Simple threshold
+                temp_status = "hot" if temp_value >= self.temperature_threshold_config["threshold"] else "cool"
                 
                 if self.local_state.get("temperature_status") != temp_status:
                     self.local_state["temperature_status"] = temp_status
@@ -626,6 +646,175 @@ class ClubHouseAgent(VirtualAgent):
         
         if proximity_changed:
             logger.info(f"[{self.agent_id}] Published context update - PROXIMITY CHANGED: {sensor_payload.value}{sensor_payload.unit}")
+
+    # ------------------------------------------------------------------
+    # Threshold MQTT handling
+    # ------------------------------------------------------------------
+
+    def _setup_threshold_subscription(self):
+        """Subscribe to threshold config command topic."""
+        try:
+            threshold_topic = TopicManager.threshold_config_command(self.agent_id)
+            self.mqtt_client.subscribe(threshold_topic, qos=1)
+            logger.info(f"[{self.agent_id}] Subscribed to threshold config topic: {threshold_topic}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Failed to subscribe to threshold config topic: {e}")
+
+    def _handle_threshold_config_message(self, client, userdata, msg):
+        """Decode and dispatch a thresholdConfig MQTT message."""
+        try:
+            message_str = msg.payload.decode("utf-8")
+            event = MQTTMessage.deserialize(message_str)
+            if event.event.type == "thresholdConfig":
+                threshold_payload = MQTTMessage.get_payload_as(event, ThresholdConfigPayload)
+                self._process_threshold_config(threshold_payload, event.event.id)
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error handling threshold config message: {e}")
+
+    def _process_threshold_config(self, threshold_payload: ThresholdConfigPayload, command_id: str):
+        """Apply a light or temperature threshold update and publish the result."""
+        try:
+            t_type = threshold_payload.threshold_type
+            if t_type not in ("light", "temperature"):
+                result_event = EventFactory.create_threshold_config_result_event(
+                    agent_id=self.agent_id,
+                    command_id=command_id,
+                    success=False,
+                    message=f"Unsupported threshold type: {t_type}",
+                    threshold_type=t_type,
+                    current_config={}
+                )
+                self._publish_threshold_config_result(result_event)
+                return
+
+            config = threshold_payload.config
+            success = False
+            message = ""
+
+            with self.state_lock:
+                if t_type == "light":
+                    cfg = self.light_threshold_config
+                    if "threshold" in config:
+                        new_val = float(config["threshold"])
+                        if new_val > 0:
+                            old_val = cfg["threshold"]
+                            cfg["threshold"] = new_val
+                            cfg["last_update"] = time.time()
+                            self.local_state["light_threshold"] = new_val
+                            success = True
+                            message = f"Light threshold updated from {old_val} lux to {new_val} lux"
+                            logger.info(f"[{self.agent_id}] {message}")
+                            self._reevaluate_light_status()
+                        else:
+                            message = f"Invalid light threshold: {new_val}. Must be > 0"
+                    else:
+                        message = "No threshold value provided in configuration"
+                    current_config = cfg.copy()
+
+                else:  # temperature
+                    cfg = self.temperature_threshold_config
+                    if "threshold" in config:
+                        new_val = float(config["threshold"])
+                        if 0 <= new_val <= 50:
+                            old_val = cfg["threshold"]
+                            cfg["threshold"] = new_val
+                            cfg["last_update"] = time.time()
+                            self.local_state["temp_threshold"] = new_val
+                            success = True
+                            message = f"Temperature threshold updated from {old_val}°C to {new_val}°C"
+                            logger.info(f"[{self.agent_id}] {message}")
+                            self._reevaluate_temperature_status()
+                        else:
+                            message = f"Invalid temperature threshold: {new_val}. Must be between 0-50°C"
+                    else:
+                        message = "No threshold value provided in configuration"
+                    current_config = cfg.copy()
+
+            result_event = EventFactory.create_threshold_config_result_event(
+                agent_id=self.agent_id,
+                command_id=command_id,
+                success=success,
+                message=message,
+                threshold_type=t_type,
+                current_config=current_config
+            )
+            self._publish_threshold_config_result(result_event)
+
+            if success:
+                self._trigger_state_publication()
+
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error processing threshold config: {e}")
+            result_event = EventFactory.create_threshold_config_result_event(
+                agent_id=self.agent_id,
+                command_id=command_id,
+                success=False,
+                message=f"Error processing threshold config: {str(e)}",
+                threshold_type=threshold_payload.threshold_type,
+                current_config={}
+            )
+            self._publish_threshold_config_result(result_event)
+
+    def _publish_threshold_config_result(self, result_event):
+        """Publish threshold configuration result to MQTT."""
+        try:
+            result_topic = TopicManager.threshold_config_result(self.agent_id)
+            message = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, message, qos=1)
+            logger.debug(f"[{self.agent_id}] Published threshold config result to {result_topic}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Failed to publish threshold config result: {e}")
+
+    def _reevaluate_light_status(self):
+        """Re-classify light status using the current threshold against stored sensor data."""
+        for sensor_data in self.sensor_data.values():
+            if sensor_data.get("sensor_type") == "light":
+                try:
+                    self._classify_light_status(float(sensor_data["value"]))
+                except (ValueError, TypeError):
+                    pass
+                return
+
+    def _reevaluate_temperature_status(self):
+        """Re-classify temperature status using the current threshold against stored sensor data."""
+        for sensor_data in self.sensor_data.values():
+            if sensor_data.get("sensor_type") == "temperature":
+                try:
+                    self._classify_temperature_status(float(sensor_data["value"]))
+                except (ValueError, TypeError):
+                    pass
+                return
+
+    def _classify_light_status(self, lux_value: float):
+        """Update light_status using dynamic threshold (must be called under state_lock)."""
+        threshold = self.light_threshold_config["threshold"]
+        new_status = "dark" if lux_value < threshold else "bright"
+        if self.local_state.get("light_status") != new_status:
+            self.local_state["light_status"] = new_status
+            logger.info(f"[{self.agent_id}] Updated light_status to: {new_status} (lux: {lux_value}, threshold: {threshold})")
+
+    def _classify_temperature_status(self, temp_value: float):
+        """Update temperature_status using dynamic threshold (must be called under state_lock)."""
+        threshold = self.temperature_threshold_config["threshold"]
+        new_status = "hot" if temp_value >= threshold else "cool"
+        if self.local_state.get("temperature_status") != new_status:
+            self.local_state["temperature_status"] = new_status
+            logger.info(f"[{self.agent_id}] Updated temperature_status to: {new_status} (temp: {temp_value}°C, threshold: {threshold}°C)")
+
+    def _on_connect(self, client, userdata, flags, rc):
+        """Extend base _on_connect to add threshold subscription."""
+        super()._on_connect(client, userdata, flags, rc)
+        if rc == 0:
+            self._setup_threshold_subscription()
+
+    def _on_message(self, client, userdata, msg):
+        """Route threshold config messages; delegate everything else to base class."""
+        if msg.topic == TopicManager.threshold_config_command(self.agent_id):
+            self._handle_threshold_config_message(client, userdata, msg)
+        else:
+            super()._on_message(client, userdata, msg)
+
+    # ------------------------------------------------------------------
 
     def __turn_on_lights(self):
         """Turn on lights with preset-specific settings."""
