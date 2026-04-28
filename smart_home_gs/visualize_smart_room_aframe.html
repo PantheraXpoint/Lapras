@@ -1069,9 +1069,18 @@
 
         function fillThresholdTypeByAgent(agentId) {
           if (!thresholdTypeEl) return;
-          if (agentId === 'aircon') thresholdTypeEl.innerHTML = '<option value="temperature">temperature</option>';
-          else if (agentId === 'hue_light') thresholdTypeEl.innerHTML = '<option value="light">light</option>';
-          else thresholdTypeEl.innerHTML = '';
+          const caps = lastControlCaps || {};
+          const profile = (caps.agent_capabilities || {})[agentId] || {};
+          const types = Array.isArray(profile.threshold_types) ? profile.threshold_types : [];
+          if (!agentId || types.length === 0) {
+            thresholdTypeEl.innerHTML = '';
+            return;
+          }
+          const previous = thresholdTypeEl.value;
+          thresholdTypeEl.innerHTML = types
+            .map((t) => `<option value="${t}">${t}</option>`)
+            .join('');
+          if (types.includes(previous)) thresholdTypeEl.value = previous;
         }
 
         function renderSelectedAgentDetails() {

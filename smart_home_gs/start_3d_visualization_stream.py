@@ -190,8 +190,8 @@ def build_control_capabilities(agent_ids: Iterable[str], control_mode: str = "un
         elif is_clubhouse:
             rules_support = True
             preset_support = True
-            threshold_support = False
-            threshold_types = []
+            threshold_support = True
+            threshold_types = ["light", "temperature"]
         elif canonical == "aircon":
             rules_support = True
             preset_support = False
@@ -1744,6 +1744,26 @@ def make_handler(
                     return
                 if threshold_type not in ("temperature", "light"):
                     self._write_json({"error": "threshold_type must be temperature or light"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                caps_for_validation = build_control_capabilities(observed_agents, control_mode="automated")
+                agent_profile = (caps_for_validation.get("agent_capabilities") or {}).get(agent_id, {})
+                supported_types = agent_profile.get("threshold_types") or []
+                if not agent_profile.get("threshold"):
+                    self._write_json(
+                        {"error": f"agent_id {agent_id!r} does not support threshold configuration"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if threshold_type not in supported_types:
+                    self._write_json(
+                        {
+                            "error": (
+                                f"threshold_type {threshold_type!r} not supported by agent {agent_id!r}"
+                            ),
+                            "supported_threshold_types": supported_types,
+                        },
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
                     return
                 try:
                     threshold_value = float(threshold)
