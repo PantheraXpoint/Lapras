@@ -38,3 +38,5 @@ simulate_virtual_agent.py
 sub.sh
 smart_home_gs/start_3d_visualization_stream_old.py
 smart_home_gs/visualize_virtual_sensors_3d.html
+smart_home_gs/infrared-conditional-failover.plan.md
+smart_home_gs/clubhouse-threshold-support_53c9a556.plan.md
