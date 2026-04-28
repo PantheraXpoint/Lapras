@@ -454,6 +454,64 @@ class LiveSensorStore:
             return len(self._per_agent_flat)
 
 
+class NotificationStore:
+    """Append-only in-memory timeline of UX notifications.
+
+    Drives the dashboard "Notification" tab. Used by the conditional-failover
+    simulator to post the demo's three-step status sequence (failure detected,
+    notifying maintenance, replacement applied). Append-only by design — the
+    UI shows history in order so an operator can review the sequence after
+    the fact, not just the latest line. /clear is provided for demo resets.
+    """
+
+    DEFAULT_MAX_ENTRIES = 500
+
+    def __init__(self, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
+        self._lock = threading.Lock()
+        self._entries: List[Dict[str, Any]] = []
+        self._next_id = 1
+        self._max_entries = max(1, int(max_entries))
+
+    def append(self, message: str, source: Optional[str] = None,
+               level: str = "info", metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        text = (message or "").strip()
+        if not text:
+            raise ValueError("message must be non-empty")
+        entry = {
+            "id": 0,  # filled under lock
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": text,
+            "source": (source or "system").strip() or "system",
+            "level": (level or "info").strip().lower() or "info",
+            "metadata": metadata if isinstance(metadata, dict) else {},
+        }
+        with self._lock:
+            entry["id"] = self._next_id
+            self._next_id += 1
+            self._entries.append(entry)
+            # Cap memory; oldest entries fall off when sustained traffic exceeds the cap.
+            if len(self._entries) > self._max_entries:
+                self._entries = self._entries[-self._max_entries:]
+            return dict(entry)
+
+    def list(self, since_id: int = 0, limit: Optional[int] = None) -> Dict[str, Any]:
+        with self._lock:
+            entries = [e for e in self._entries if e["id"] > since_id]
+            if isinstance(limit, int) and limit > 0:
+                entries = entries[-limit:]
+            return {
+                "entries": [dict(e) for e in entries],
+                "next_id": self._next_id,
+                "total": len(self._entries),
+            }
+
+    def clear(self) -> Dict[str, Any]:
+        with self._lock:
+            removed = len(self._entries)
+            self._entries = []
+            return {"cleared": removed, "next_id": self._next_id}
+
+
 class DashboardOpsClient:
     """Bridge UI HTTP actions to existing dashboard/context MQTT command topics."""
 
@@ -1397,6 +1455,7 @@ def make_handler(
     caption_engine: Optional[LiveCaptionEngine] = None,
     milvus_store=None,
     rag_enabled: bool = True,
+    notifications: Optional[NotificationStore] = None,
 ):
     # Directory containing the HTML file — static files are served from here
     static_dir = os.path.dirname(os.path.abspath(html_path))
@@ -1470,6 +1529,32 @@ def make_handler(
                 # Keep API stable even when control-mode replies are delayed/missing.
                 # UI can still operate with cached/unknown mode instead of surfacing HTTP 503.
                 self._write_json(result, status=HTTPStatus.OK)
+                return
+            if path_only == "/api/notifications":
+                # Notification timeline read for the UI panel and simulator scripts.
+                # Optional ?since_id=<int> returns only entries newer than that id —
+                # lets the UI poll cheaply without resending the full history.
+                qs = parsed.query or ""
+                since_id = 0
+                limit: Optional[int] = None
+                for chunk in qs.split("&"):
+                    if not chunk:
+                        continue
+                    k, _, v = chunk.partition("=")
+                    if k == "since_id":
+                        try:
+                            since_id = int(v)
+                        except ValueError:
+                            since_id = 0
+                    elif k == "limit":
+                        try:
+                            limit = int(v)
+                        except ValueError:
+                            limit = None
+                if notifications is None:
+                    self._write_json({"entries": [], "next_id": 1, "total": 0})
+                else:
+                    self._write_json(notifications.list(since_id=since_id, limit=limit))
                 return
             if path_only == "/api/automation/catalog":
                 payload = build_rules_catalog_payload()
@@ -1582,6 +1667,39 @@ def make_handler(
                     self._write_json({"error": "invalid JSON body"}, status=HTTPStatus.BAD_REQUEST)
                     return
                 self._handle_chat(body)
+                return
+
+            # Notification endpoints don't depend on ops_client either; the simulator
+            # and dashboard UI both write/read the in-memory timeline.
+            if path_only == "/api/notifications":
+                body = self._read_json_body()
+                if body is None:
+                    self._write_json({"error": "invalid JSON body"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                if notifications is None:
+                    self._write_json({"error": "notifications disabled"}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                    return
+                message = body.get("message")
+                if not isinstance(message, str) or not message.strip():
+                    self._write_json({"error": "message required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                source = body.get("source") if isinstance(body.get("source"), str) else None
+                level = body.get("level") if isinstance(body.get("level"), str) else "info"
+                metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else None
+                try:
+                    entry = notifications.append(message, source=source, level=level, metadata=metadata)
+                except ValueError as exc:
+                    self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._write_json({"success": True, "entry": entry})
+                return
+            if path_only == "/api/notifications/clear":
+                if notifications is None:
+                    self._write_json({"error": "notifications disabled"}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                    return
+                result = notifications.clear()
+                result["success"] = True
+                self._write_json(result)
                 return
 
             if path_only not in (
@@ -1991,11 +2109,14 @@ def main():
     except Exception as exc:
         logger.warning("[3D] Ops MQTT client disabled: %s", exc)
 
+    notifications = NotificationStore()
+
     handler = make_handler(
         store, html_path, ops_client=ops_client,
         caption_engine=caption_engine,
         milvus_store=milvus_store_instance if rag_enabled else None,
         rag_enabled=rag_enabled,
+        notifications=notifications,
     )
     httpd = ThreadingHTTPServer((args.http_host, args.http_port), handler)
 
@@ -2015,6 +2136,9 @@ def main():
     print(f"Preset POST: http://{args.http_host}:{args.http_port}/api/automation/preset/apply")
     print(f"Thres POST:  http://{args.http_host}:{args.http_port}/api/automation/threshold/apply")
     print(f"Sensr POST:  http://{args.http_host}:{args.http_port}/api/sensor-config/apply")
+    print(f"Notif GET:   http://{args.http_host}:{args.http_port}/api/notifications")
+    print(f"Notif POST:  http://{args.http_host}:{args.http_port}/api/notifications")
+    print(f"Notif CLEAR: http://{args.http_host}:{args.http_port}/api/notifications/clear")
     print(f"Chat POST:   http://{args.http_host}:{args.http_port}/api/chat")
     print(f"XML URL:     http://{args.http_host}:{args.http_port}/smart_room.xml")
     print(f"Captioning:  enabled (window={args.caption_window_sec}s, model={args.caption_model})")

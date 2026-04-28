@@ -283,6 +283,7 @@
         <button id="tab-insights" class="panel-tab-btn active" type="button">Insights</button>
         <button id="tab-control" class="panel-tab-btn" type="button">Control</button>
         <button id="tab-sensor-config" class="panel-tab-btn" type="button">Sensor Config</button>
+        <button id="tab-notification" class="panel-tab-btn" type="button">Notification</button>
       </div>
       <section id="panel-page-insights" class="panel-page active">
         <aside id="side-panel">
@@ -409,6 +410,21 @@
           <div id="sensorcfg-id-list" class="control-rows"></div>
           <div class="control-row"><button id="sensorcfg-apply-btn" class="control-btn" type="button">Apply Sensor Config</button></div>
           <p id="sensorcfg-result" class="support-status"></p>
+        </section>
+      </section>
+      <section id="panel-page-notification" class="panel-page">
+        <section id="notification-panel" class="panel-block">
+          <h3>Notification</h3>
+          <p class="panel-note">Append-only timeline of system notifications. Newest entries appear at the bottom.</p>
+          <div class="control-row" style="margin-bottom:6px;">
+            <span id="notif-status-line" class="panel-note" style="flex:1;margin:0;">Loading…</span>
+            <button id="notif-clear-btn" class="control-btn" type="button">Clear</button>
+          </div>
+          <div id="notif-timeline" class="control-rows" style="max-height:50vh;overflow-y:auto;"></div>
+          <div class="control-row" style="margin-top:8px;gap:6px;">
+            <button id="notif-room-empty-btn" class="control-btn" type="button">Room is empty</button>
+            <button id="notif-room-normal-btn" class="control-btn" type="button">Room is normal</button>
+          </div>
         </section>
       </section>
     </aside>
@@ -701,9 +717,16 @@
       const tabInsightsBtn = document.getElementById('tab-insights');
       const tabControlBtn = document.getElementById('tab-control');
       const tabSensorCfgBtn = document.getElementById('tab-sensor-config');
+      const tabNotificationBtn = document.getElementById('tab-notification');
       const pageInsights = document.getElementById('panel-page-insights');
       const pageControl = document.getElementById('panel-page-control');
       const pageSensorCfg = document.getElementById('panel-page-sensor-config');
+      const pageNotification = document.getElementById('panel-page-notification');
+      const notifTimelineEl = document.getElementById('notif-timeline');
+      const notifStatusEl = document.getElementById('notif-status-line');
+      const notifClearBtn = document.getElementById('notif-clear-btn');
+      const notifRoomEmptyBtn = document.getElementById('notif-room-empty-btn');
+      const notifRoomNormalBtn = document.getElementById('notif-room-normal-btn');
 
       let selectedVisual = null;
       let selectedPanel = null;
@@ -806,17 +829,156 @@
         const insights = page === 'insights';
         const control = page === 'control';
         const sensorcfg = page === 'sensor-config';
+        const notification = page === 'notification';
         if (pageInsights) pageInsights.classList.toggle('active', insights);
         if (pageControl) pageControl.classList.toggle('active', control);
         if (pageSensorCfg) pageSensorCfg.classList.toggle('active', sensorcfg);
+        if (pageNotification) pageNotification.classList.toggle('active', notification);
         if (tabInsightsBtn) tabInsightsBtn.classList.toggle('active', insights);
         if (tabControlBtn) tabControlBtn.classList.toggle('active', control);
         if (tabSensorCfgBtn) tabSensorCfgBtn.classList.toggle('active', sensorcfg);
+        if (tabNotificationBtn) tabNotificationBtn.classList.toggle('active', notification);
       }
 
       if (tabInsightsBtn) tabInsightsBtn.addEventListener('click', () => setRightPanelPage('insights'));
       if (tabControlBtn) tabControlBtn.addEventListener('click', () => setRightPanelPage('control'));
       if (tabSensorCfgBtn) tabSensorCfgBtn.addEventListener('click', () => setRightPanelPage('sensor-config'));
+      if (tabNotificationBtn) tabNotificationBtn.addEventListener('click', () => setRightPanelPage('notification'));
+
+      // --- Notification timeline ---
+      // Fetch-merge-render append-only history. Polled every 2s and on tab activation
+      // so the timeline reflects new entries posted by simulators (e.g. light failure
+      // demo) without disrupting other tabs.
+      const notifSeen = new Set();
+      let notifNextId = 0;
+
+      function formatNotifTime(iso) {
+        if (!iso) return '';
+        try {
+          const d = new Date(iso);
+          if (isNaN(d.getTime())) return iso;
+          const pad = (n) => String(n).padStart(2, '0');
+          return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        } catch (_) {
+          return iso;
+        }
+      }
+
+      function notifLevelColor(level) {
+        switch ((level || 'info').toLowerCase()) {
+          case 'warn':
+          case 'warning': return '#b45309';
+          case 'error': return '#b91c1c';
+          case 'success': return '#15803d';
+          default: return '#0f172a';
+        }
+      }
+
+      function appendNotifEntry(entry) {
+        if (!notifTimelineEl || !entry || notifSeen.has(entry.id)) return;
+        notifSeen.add(entry.id);
+        const row = document.createElement('div');
+        row.className = 'control-row';
+        row.style.alignItems = 'flex-start';
+        row.style.gap = '8px';
+        row.style.padding = '4px 0';
+        row.style.borderBottom = '1px solid #e2e8f0';
+        const tsEl = document.createElement('span');
+        tsEl.style.minWidth = '70px';
+        tsEl.style.fontFamily = 'monospace';
+        tsEl.style.fontSize = '11px';
+        tsEl.style.color = '#64748b';
+        tsEl.textContent = formatNotifTime(entry.timestamp);
+        const msgEl = document.createElement('span');
+        msgEl.style.flex = '1';
+        msgEl.style.fontSize = '12px';
+        msgEl.style.color = notifLevelColor(entry.level);
+        msgEl.textContent = entry.message || '';
+        const srcEl = document.createElement('span');
+        srcEl.style.fontSize = '10px';
+        srcEl.style.color = '#94a3b8';
+        srcEl.textContent = entry.source ? `[${entry.source}]` : '';
+        row.appendChild(tsEl);
+        row.appendChild(msgEl);
+        row.appendChild(srcEl);
+        notifTimelineEl.appendChild(row);
+        notifTimelineEl.scrollTop = notifTimelineEl.scrollHeight;
+      }
+
+      async function refreshNotifications() {
+        try {
+          const url = `/api/notifications?since_id=${notifNextId > 0 ? (notifNextId - 1) : 0}`;
+          const resp = await fetch(url);
+          if (!resp.ok) {
+            if (notifStatusEl) notifStatusEl.textContent = `Error: HTTP ${resp.status}`;
+            return;
+          }
+          const data = await resp.json();
+          const entries = Array.isArray(data.entries) ? data.entries : [];
+          for (const e of entries) appendNotifEntry(e);
+          if (typeof data.next_id === 'number') notifNextId = data.next_id;
+          if (notifStatusEl) {
+            const total = (typeof data.total === 'number') ? data.total : notifSeen.size;
+            notifStatusEl.textContent = total === 0
+              ? 'No notifications yet.'
+              : `${total} notification${total === 1 ? '' : 's'} in timeline.`;
+          }
+        } catch (err) {
+          if (notifStatusEl) notifStatusEl.textContent = `Error: ${err.message || err}`;
+        }
+      }
+
+      async function clearNotifications() {
+        try {
+          const resp = await fetch('/api/notifications/clear', { method: 'POST' });
+          if (!resp.ok) {
+            if (notifStatusEl) notifStatusEl.textContent = `Clear failed: HTTP ${resp.status}`;
+            return;
+          }
+          if (notifTimelineEl) notifTimelineEl.innerHTML = '';
+          notifSeen.clear();
+          notifNextId = 0;
+          await refreshNotifications();
+        } catch (err) {
+          if (notifStatusEl) notifStatusEl.textContent = `Clear error: ${err.message || err}`;
+        }
+      }
+
+      if (notifClearBtn) notifClearBtn.addEventListener('click', clearNotifications);
+
+      // Operator-driven status updates. Posting goes through the same
+      // /api/notifications endpoint the simulator uses, so these entries land
+      // in the same timeline and ordering as automated events.
+      async function postNotification(message, level = 'info', source = 'dashboard-ui') {
+        try {
+          const resp = await fetch('/api/notifications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, level, source }),
+          });
+          if (!resp.ok) {
+            if (notifStatusEl) notifStatusEl.textContent = `Post failed: HTTP ${resp.status}`;
+            return false;
+          }
+          await refreshNotifications();
+          return true;
+        } catch (err) {
+          if (notifStatusEl) notifStatusEl.textContent = `Post error: ${err.message || err}`;
+          return false;
+        }
+      }
+
+      if (notifRoomEmptyBtn) notifRoomEmptyBtn.addEventListener('click', () => {
+        postNotification('The room is empty, maintenance team is coming ...', 'info');
+      });
+      if (notifRoomNormalBtn) notifRoomNormalBtn.addEventListener('click', () => {
+        postNotification('Maintenance complete. Room is normal.', 'success');
+      });
+
+      // Initial fetch + 2s poll. Continues regardless of which tab is active so the
+      // timeline is current the moment the user opens the Notification tab.
+      refreshNotifications();
+      setInterval(refreshNotifications, 2000);
 
       try {
         const THREE = window.THREE || (window.AFRAME && window.AFRAME.THREE);
