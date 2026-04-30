@@ -76,10 +76,10 @@ class ContextRuleManager:
         self.action_command_lock = threading.Lock()
         
         # Extended window logic for agents - configurable timing
-        self.extended_window_agents: Dict[str, Dict[str, Any]] = {}  # agent_id -> {start_time, duration, last_extend_time}
+        self.extended_window_agents: Dict[str, Dict[str, Any]] = {}  # agent_id -> {start_time, duration, match_count, next_window_booked, is_fast_response}
         self.extended_window_lock = threading.Lock()
-        # Fast state change: 15.0 for quick OFF response | Stable state: 60.0 for longer device ON time
-        self.EXTENDED_WINDOW_DURATION = 60.0  # 60 seconds (change to 15.0 for fast OFF response)
+        self.EXTENDED_WINDOW_DURATION = 60.0
+        self.WINDOW_MATCH_THRESHOLD = 3  # rule matches needed in a slot to book the next slot
 
         # Explicit demo control mode. In manual mode, rule-driven actuation is suppressed.
         self._control_mode = "automated"
@@ -880,86 +880,105 @@ class ContextRuleManager:
     def _apply_extended_window_logic(self, agent_id: str, current_power: str, raw_rule_decision: str) -> str:
         """
         Apply extended window logic to rule decisions.
-        
-        Logic:
-        - OFF → ON: Start extended window, return "on"
-        - During normal extended window (60s):
-          - Rule says "on": Extend window, return "on" 
-          - Rule says "off": Continue countdown, return "on"
-        - During fast response window (5s):
-          - Rule says "on": Convert to normal 60s window, return "on"
-          - Rule says "off": Allow immediate OFF, return "off"
-        - After window expires: Allow "off", return "off"
+
+        Normal 60s window uses fixed-boundary slots:
+        - OFF → ON: Start slot [T, T+60], match_count=1, return "on"
+        - During slot: rule "on" → increment match_count; if >= WINDOW_MATCH_THRESHOLD, book next slot
+        - During slot: rule "off" → stay "on" (slot protects device)
+        - Slot expires with next slot booked → activate new slot [now, now+60], return "on"
+        - Slot expires without next slot booked → delete window, follow raw decision
+
+        Fast-response window (5s):
+        - Rule "on": discard fast window, open fresh 60s slot, return "on"
+        - Rule "off": discard fast window, return "off"
         """
         current_time = time.time()
-        
+
         logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Evaluating for '{agent_id}' - current: {current_power}, rule: {raw_rule_decision}")
-        
+
         with self.extended_window_lock:
             window_info = self.extended_window_agents.get(agent_id)
-            
-            # Case 1: OFF → ON (start new window)
+
+            # Case 1: OFF → ON (start new slot) - unchanged
             if current_power == "off" and raw_rule_decision == "on":
                 self.extended_window_agents[agent_id] = {
                     "start_time": current_time,
                     "duration": self.EXTENDED_WINDOW_DURATION,
-                    "last_extend_time": current_time,
-                    "is_fast_response": False
+                    "match_count": 1,
+                    "next_window_booked": False,
+                    "is_fast_response": False,
                 }
-                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Started {self.EXTENDED_WINDOW_DURATION}s window for '{agent_id}'")
+                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Started {self.EXTENDED_WINDOW_DURATION}s slot for '{agent_id}'")
                 return "on"
-            
-            # Case 2: No active window, follow raw decision
+
+            # Case 2: No active window, follow raw decision - unchanged
             if not window_info:
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: No active window for '{agent_id}', following raw decision: {raw_rule_decision}")
                 return raw_rule_decision
-            
-            # Case 3: Active window - check if expired
-            window_start = window_info["start_time"]
-            last_extend = window_info["last_extend_time"]
+
+            # Case 3: Active window - check if expired (all windows use start_time for expiry)
             current_duration = window_info.get("duration", self.EXTENDED_WINDOW_DURATION)
             is_fast_response = window_info.get("is_fast_response", False)
-            time_since_last_extend = current_time - last_extend
-            
-            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Active for '{agent_id}' - time since last extend: {time_since_last_extend:.1f}s / {current_duration}s (fast_response: {is_fast_response})")
-            
-            # Window expired?
-            if time_since_last_extend >= current_duration:
-                # Window expired - remove it and allow raw decision
+            time_in_window = current_time - window_info["start_time"]
+
+            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Active for '{agent_id}' - elapsed: {time_in_window:.1f}s / {current_duration}s (fast_response: {is_fast_response}, match_count: {window_info.get('match_count', '-')}, next_booked: {window_info.get('next_window_booked', '-')})")
+
+            if time_in_window >= current_duration:
+                if is_fast_response:
+                    # Fast-response slot expired - discard and follow raw decision
+                    del self.extended_window_agents[agent_id]
+                    logger.info(f"[{self.service_id}] 🕰️  FAST RESPONSE: Slot EXPIRED for '{agent_id}' - following raw decision: {raw_rule_decision}")
+                    return raw_rule_decision
+
+                # Normal slot expired - check if next slot was booked
+                next_booked = window_info.get("next_window_booked", False)
                 del self.extended_window_agents[agent_id]
-                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: EXPIRED for '{agent_id}' after {time_since_last_extend:.1f}s - allowing raw decision: {raw_rule_decision}")
-                return raw_rule_decision
-            
-            # Case 4: Fast response window (5s) - allow immediate rule evaluation
-            if is_fast_response:
-                if raw_rule_decision == "on":
-                    # Convert to normal 60s extended window
+                if next_booked:
+                    match_count = 1 if raw_rule_decision == "on" else 0
                     self.extended_window_agents[agent_id] = {
                         "start_time": current_time,
                         "duration": self.EXTENDED_WINDOW_DURATION,
-                        "last_extend_time": current_time,
-                        "is_fast_response": False
+                        "match_count": match_count,
+                        "next_window_booked": match_count >= self.WINDOW_MATCH_THRESHOLD,
+                        "is_fast_response": False,
                     }
-                    logger.info(f"[{self.service_id}] 🕰️  FAST RESPONSE: Rule says 'on' for '{agent_id}' - converting to {self.EXTENDED_WINDOW_DURATION}s extended window")
+                    logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Slot EXPIRED for '{agent_id}' - next slot booked, activating new {self.EXTENDED_WINDOW_DURATION}s slot")
                     return "on"
                 else:
-                    # Allow immediate OFF during fast response
+                    logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Slot EXPIRED for '{agent_id}' - no next slot booked, following raw decision: {raw_rule_decision}")
+                    return raw_rule_decision
+
+            # Case 4: Fast-response window - unchanged
+            if is_fast_response:
+                if raw_rule_decision == "on":
+                    # Discard fast window, open fresh 60s slot
+                    self.extended_window_agents[agent_id] = {
+                        "start_time": current_time,
+                        "duration": self.EXTENDED_WINDOW_DURATION,
+                        "match_count": 1,
+                        "next_window_booked": False,
+                        "is_fast_response": False,
+                    }
+                    logger.info(f"[{self.service_id}] 🕰️  FAST RESPONSE: Rule says 'on' for '{agent_id}' - opening fresh {self.EXTENDED_WINDOW_DURATION}s slot")
+                    return "on"
+                else:
                     del self.extended_window_agents[agent_id]
                     logger.info(f"[{self.service_id}] 🕰️  FAST RESPONSE: Rule says 'off' for '{agent_id}' - allowing immediate OFF")
                     return "off"
-            
-            # Case 5: Normal extended window, rule says "on" - extend window
+
+            # Case 5: Normal slot active, rule says "on" - increment match count
             if raw_rule_decision == "on":
-                self.extended_window_agents[agent_id]["last_extend_time"] = current_time
-                remaining_time = current_duration - time_since_last_extend
-                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Extended for '{agent_id}' (reset to {current_duration}s)")
+                window_info["match_count"] = window_info.get("match_count", 0) + 1
+                if window_info["match_count"] >= self.WINDOW_MATCH_THRESHOLD:
+                    window_info["next_window_booked"] = True
+                remaining = current_duration - time_in_window
+                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Match #{window_info['match_count']} for '{agent_id}' (next_booked={window_info['next_window_booked']}, {remaining:.1f}s remaining)")
                 return "on"
-            
-            # Case 6: Normal extended window, rule says "off" - continue countdown, stay on
-            else:
-                remaining_time = current_duration - time_since_last_extend
-                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Rule says 'off' for '{agent_id}', but in window ({remaining_time:.1f}s remaining) - staying on")
-                return "on"
+
+            # Case 6: Normal slot active, rule says "off" - slot protects device, stay on
+            remaining = current_duration - time_in_window
+            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Rule says 'off' for '{agent_id}', slot active ({remaining:.1f}s remaining) - staying on")
+            return "on"
 
     def _determine_actions_from_state_change(self, old_state: Dict[str, Any], new_state: Dict[str, Any]) -> list:
         """Determine what action commands to send based on state changes."""
@@ -1066,49 +1085,34 @@ class ContextRuleManager:
                 logger.info(f"[{self.service_id}] Cleared extended windows for {len(cleared_agents)} agents due to duration change")
 
     def _set_fast_response_window(self, agent_id: str, reason: str = "configuration change") -> None:
-        """Set a 5-second extended window for faster response to configuration changes."""
+        """Replace any existing window with a fresh 5-second fast-response window."""
         with self.extended_window_lock:
             current_time = time.time()
-            if agent_id in self.extended_window_agents:
-                # Override existing window - set to 5 seconds
-                self.extended_window_agents[agent_id]["duration"] = 5.0
-                self.extended_window_agents[agent_id]["last_extend_time"] = current_time
-                self.extended_window_agents[agent_id]["is_fast_response"] = True
-                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Set window to 5 seconds for '{agent_id}'")
-            else:
-                # Create new 5-second window
-                self.extended_window_agents[agent_id] = {
-                    "start_time": current_time,
-                    "duration": 5.0,
-                    "last_extend_time": current_time,
-                    "is_fast_response": True
-                }
-                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Created 5-second window for '{agent_id}'")
+            self.extended_window_agents[agent_id] = {
+                "start_time": current_time,
+                "duration": 5.0,
+                "match_count": 0,
+                "next_window_booked": False,
+                "is_fast_response": True,
+            }
+            logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Created 5-second fast-response window for '{agent_id}'")
 
     def _set_fast_response_window_for_all_agents(self, reason: str = "rule change") -> None:
-        """Set 5-second extended windows for all known agents after rule changes."""
+        """Replace any existing window with a fresh 5-second fast-response window for all known agents."""
         with self.extended_window_lock:
             current_time = time.time()
             affected_agents = []
-            
             for agent_id in self.known_agents:
-                if agent_id in self.extended_window_agents:
-                    # Override existing window - set to 5 seconds
-                    self.extended_window_agents[agent_id]["duration"] = 5.0
-                    self.extended_window_agents[agent_id]["last_extend_time"] = current_time
-                    self.extended_window_agents[agent_id]["is_fast_response"] = True
-                else:
-                    # Create new 5-second window
-                    self.extended_window_agents[agent_id] = {
-                        "start_time": current_time,
-                        "duration": 5.0,
-                        "last_extend_time": current_time,
-                        "is_fast_response": True
-                    }
+                self.extended_window_agents[agent_id] = {
+                    "start_time": current_time,
+                    "duration": 5.0,
+                    "match_count": 0,
+                    "next_window_booked": False,
+                    "is_fast_response": True,
+                }
                 affected_agents.append(agent_id)
-            
             if affected_agents:
-                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Set 5-second windows for {len(affected_agents)} agents: {affected_agents}")
+                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Created 5-second fast-response windows for {len(affected_agents)} agents: {affected_agents}")
 
     def get_extended_window_status(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get the current extended window status for debugging purposes."""
@@ -1116,23 +1120,23 @@ class ContextRuleManager:
             window_info = self.extended_window_agents.get(agent_id)
             if not window_info:
                 return None
-            
+
             current_time = time.time()
             current_duration = window_info.get("duration", self.EXTENDED_WINDOW_DURATION)
-            time_since_last_extend = current_time - window_info["last_extend_time"]
-            remaining_time = current_duration - time_since_last_extend
-            total_window_time = current_time - window_info["start_time"]
-            
+            time_in_window = current_time - window_info["start_time"]
+            remaining_time = current_duration - time_in_window
+
             return {
                 "agent_id": agent_id,
                 "window_start": window_info["start_time"],
-                "last_extend": window_info["last_extend_time"],
                 "current_time": current_time,
-                "time_since_last_extend": time_since_last_extend,
+                "time_in_window": time_in_window,
                 "remaining_time": remaining_time,
-                "total_window_time": total_window_time,
                 "duration": current_duration,
-                "is_expired": time_since_last_extend >= current_duration
+                "match_count": window_info.get("match_count", 0),
+                "next_window_booked": window_info.get("next_window_booked", False),
+                "is_fast_response": window_info.get("is_fast_response", False),
+                "is_expired": time_in_window >= current_duration,
             }
 
     def evaluate_rules(self, agent_id: str, current_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
