@@ -91,12 +91,12 @@ RULE_SET_CATALOG: Dict[str, Dict[str, Any]] = {
     "clubhouse_all_normal": {
         "title": "Clubhouse all-normal",
         "target_agents": ["all"],
-        "rule_files": ["rules/demo_rules/all-normal.ttl"],
+        "rule_files": ["rules/demo_rules/all-normal-threshold.ttl"],
     },
     "clubhouse_all_clean": {
         "title": "Clubhouse all-clean",
         "target_agents": ["all"],
-        "rule_files": ["rules/demo_rules/all-clean.ttl"],
+        "rule_files": ["rules/demo_rules/all-clean-threshold.ttl"],
     },
     "clubhouse_repair_clean": {
         "title": "Clubhouse repair-clean",
@@ -106,22 +106,22 @@ RULE_SET_CATALOG: Dict[str, Dict[str, Any]] = {
     "clubhouse_back_read": {
         "title": "Clubhouse back-read",
         "target_agents": ["back"],
-        "rule_files": ["rules/demo_rules/back-read.ttl"],
+        "rule_files": ["rules/demo_rules/back-read-threshold.ttl"],
     },
     "clubhouse_back_nap": {
         "title": "Clubhouse back-nap",
         "target_agents": ["back"],
-        "rule_files": ["rules/demo_rules/back-nap.ttl"],
+        "rule_files": ["rules/demo_rules/back-nap-threshold.ttl"],
     },
     "clubhouse_front_read": {
         "title": "Clubhouse front-read",
         "target_agents": ["front"],
-        "rule_files": ["rules/demo_rules/front-read.ttl"],
+        "rule_files": ["rules/demo_rules/front-read-threshold.ttl"],
     },
     "clubhouse_front_nap": {
         "title": "Clubhouse front-nap",
         "target_agents": ["front"],
-        "rule_files": ["rules/demo_rules/front-nap.ttl"],
+        "rule_files": ["rules/demo_rules/front-nap-threshold.ttl"],
     },
     "energy_aircon_ir_temperature": {
         "title": "Energy aircon_ir_temperature",
@@ -1928,13 +1928,13 @@ def make_handler(
                 normalized_agent = agent_id.strip()
                 normalized_mode = mode.strip().lower()
                 clubhouse_rule_map = {
-                    ("all", "normal"): "rules/demo_rules/all-normal.ttl",
-                    ("all", "clean"): "rules/demo_rules/all-clean.ttl",
+                    ("all", "normal"): "rules/demo_rules/all-normal-threshold.ttl",
+                    ("all", "clean"): "rules/demo_rules/all-clean-threshold.ttl",
                     ("all", "repair"): "rules/demo_rules/repair-clean.ttl",
-                    ("back", "read"): "rules/demo_rules/back-read.ttl",
-                    ("back", "nap"): "rules/demo_rules/back-nap.ttl",
-                    ("front", "read"): "rules/demo_rules/front-read.ttl",
-                    ("front", "nap"): "rules/demo_rules/front-nap.ttl",
+                    ("back", "read"): "rules/demo_rules/back-read-threshold.ttl",
+                    ("back", "nap"): "rules/demo_rules/back-nap-threshold.ttl",
+                    ("front", "read"): "rules/demo_rules/front-read-threshold.ttl",
+                    ("front", "nap"): "rules/demo_rules/front-nap-threshold.ttl",
                 }
                 rule_file = clubhouse_rule_map.get((normalized_agent, normalized_mode))
                 if not rule_file:
