@@ -51,11 +51,11 @@
     <item id="ac-1" type="ac" label="AC 1"
           x="2.5" y="2.62" z="1.68"
           width="0.75" height="0.22" depth="0.55"
-          color="#14b8a6" />
+          color="#43b6f0" />
     <item id="ac-2" type="ac" label="AC 2"
           x="2.5" y="2.62" z="3.48"
           width="0.75" height="0.22" depth="0.55"
-          color="#14b8a6" />
+          color="#43b6f0" />
 
     <!-- Meeting table in center -->
     <item id="table-1" type="table" label="Meeting Table"
@@ -69,12 +69,12 @@
     <item id="chair-3"  type="chair" label="Chair 3"  bevX="25" bevY="45" activityKey="activity_s3a" />
     <item id="chair-4"  type="chair" label="Chair 4"  bevX="25" bevY="55" activityKey="activity_s4a" />
     <item id="chair-5"  type="chair" label="Chair 5"  bevX="25" bevY="65" activityKey="activity_s5a" />
-    <item id="chair-6"  type="chair" label="Chair 6"  bevX="70" bevY="18" activityKey="activity_s6a" />
+    <item id="chair-6"  type="chair" label="Chair 6"  bevX="70" bevY="68" activityKey="activity_s6a" />
     <item id="chair-7"  type="chair" label="Chair 7"  bevX="70" bevY="28" activityKey="activity_s7a" />
     <item id="chair-8"  type="chair" label="Chair 8"  bevX="70" bevY="38" activityKey="activity_s8a" />
     <item id="chair-9"  type="chair" label="Chair 9"  bevX="70" bevY="48" activityKey="activity_s9a" />
     <item id="chair-10" type="chair" label="Chair 10" bevX="70" bevY="58" activityKey="activity_s10a" />
-    <item id="chair-11" type="chair" label="Chair 11" bevX="70" bevY="68" activityKey="activity_s11a" />
+    <item id="chair-11" type="chair" label="Chair 11" bevX="70" bevY="18" activityKey="activity_s11a" />
     <item id="chair-12" type="chair" label="Chair 12" bevX="50" bevY="80" activityKey="activity_s12a" />
   </furniture>
 
@@ -106,25 +106,25 @@
     <sensor id="dist-1" kind="dist" label="Dist 1"
             bindingType="threshold_lt" sourceKey="distance_1_cm" thresholdSourceKey="distance_1_threshold_cm"
             attrKey="distance_1_cm" thresholdKey="distance_1_threshold_cm" missingPolicy="unknown"
-            x="0.18" y="1.85" z="1.50" color="#ef4444" />
+            x="0.18" y="1.50" z="3.90" color="#ef4444" />
     <sensor id="dist-2" kind="dist" label="Dist 2"
             bindingType="threshold_lt" sourceKey="distance_2_cm" thresholdSourceKey="distance_2_threshold_cm"
             attrKey="distance_2_cm" thresholdKey="distance_2_threshold_cm" missingPolicy="unknown"
-            x="0.18" y="1.25" z="2.10" color="#ef4444" />
+            x="0.18" y="1.50" z="3.30" color="#ef4444" />
     <sensor id="dist-3" kind="dist" label="Dist 3"
             bindingType="threshold_lt" sourceKey="distance_3_cm" thresholdSourceKey="distance_3_threshold_cm"
             attrKey="distance_3_cm" thresholdKey="distance_3_threshold_cm" missingPolicy="unknown"
-            x="0.18" y="1.85" z="3.30" color="#ef4444" />
+            x="0.18" y="1.50" z="2.10" color="#ef4444" />
     <sensor id="dist-4" kind="dist" label="Dist 4"
             bindingType="threshold_lt" sourceKey="distance_4_cm" thresholdSourceKey="distance_4_threshold_cm"
             attrKey="distance_4_cm" thresholdKey="distance_4_threshold_cm" missingPolicy="unknown"
-            x="0.18" y="1.60" z="3.90" color="#ef4444" />
+            x="0.18" y="1.50" z="1.50" color="#ef4444" />
 
     <!-- Light sensor (left wall, near window) -->
     <sensor id="light-1" kind="light" label="Light"
             bindingType="threshold_gt" sourceKey="light_1" thresholdSourceKey="light_1_indoor_threshold"
             attrKey="light_1" missingPolicy="unknown"
-            x="0.18" y="2.15" z="2.70" color="#facc15" />
+            x="0.18" y="2.3" z="2.70" color="#facc15" />
 
     <!-- Temperature sensor (back wall, right side) -->
     <sensor id="temp-1" kind="temp" label="Temp"
@@ -136,19 +136,19 @@
     <sensor id="ir-1" kind="ir" label="Ir 1"
             bindingType="threshold_lt" sourceKey="infrared_1_cm" thresholdSourceKey="infrared_1_threshold_cm"
             attrKey="infrared_1_cm" thresholdKey="infrared_1_threshold_cm" missingPolicy="unknown"
-            x="4.82" y="1.85" z="1.68" color="#e11d48" />
+            x="4.82" y="1.50" z="4.08" color="#f472b6" />
     <sensor id="ir-2" kind="ir" label="Ir 2"
             bindingType="threshold_lt" sourceKey="infrared_2_cm" thresholdSourceKey="infrared_2_threshold_cm"
             attrKey="infrared_2_cm" thresholdKey="infrared_2_threshold_cm" missingPolicy="unknown"
-            x="4.82" y="1.45" z="2.28" color="#f472b6" />
+            x="4.82" y="1.50" z="3.48" color="#f472b6" />
     <sensor id="ir-3" kind="ir" label="Ir 3"
             bindingType="threshold_lt" sourceKey="infrared_3_cm" thresholdSourceKey="infrared_3_threshold_cm"
             attrKey="infrared_3_cm" thresholdKey="infrared_3_threshold_cm" missingPolicy="unknown"
-            x="4.82" y="1.85" z="3.48" color="#f472b6" />
+            x="4.82" y="1.50" z="2.28" color="#f472b6" />
     <sensor id="ir-4" kind="ir" label="Ir 4"
             bindingType="threshold_lt" sourceKey="infrared_4_cm" thresholdSourceKey="infrared_4_threshold_cm"
             attrKey="infrared_4_cm" thresholdKey="infrared_4_threshold_cm" missingPolicy="unknown"
-            x="4.82" y="1.60" z="4.08" color="#f472b6" />
+            x="4.82" y="1.50" z="1.68" color="#f472b6" />
 
     <!-- Motion sensors (ceiling-mounted PIR) — all share motion_status -->
     <sensor id="mot-1"  kind="mot" label="Mot 1"  bindingType="binary" sourceKey="motion_status" attrKey="motion_status" missingPolicy="unknown"

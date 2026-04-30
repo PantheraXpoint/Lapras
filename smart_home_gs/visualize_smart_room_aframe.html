@@ -676,9 +676,14 @@
       if (evalResult.value === null) return `${label}: missing (${el.dataset.sourceKey || '?'})`;
       const valueNum = toFiniteNumber(evalResult.value);
       const valueStr = valueNum !== null && !Number.isInteger(valueNum) ? valueNum.toFixed(1) : String(evalResult.value);
+      const kind = (el.dataset.kind || '').toLowerCase();
+      if (kind === 'dist' && valueNum === 130) return label;
+      if (kind === 'ir' && valueNum === 150) return label;
+      if (kind === 'mot' && valueNum === 0) return label;
       if (evalResult.bindingType === 'threshold_lt' || evalResult.bindingType === 'threshold_gt') {
         const thr = evalResult.thresholdValue;
-        return `${label}: ${valueStr} / thr ${thr === null ? '—' : String(thr)}`;
+        // return `${label}: ${valueStr} / thr ${thr === null ? '—' : String(thr)}`;
+        return `${label}: ${valueStr}`;
       }
       if (evalResult.bindingType === 'range' || evalResult.bindingType === 'outside_range') return `${label}: ${valueStr} / ${evalResult.minValue ?? '—'}-${evalResult.maxValue ?? '—'}`;
       if (evalResult.bindingType === 'enum') return `${label}: ${String(evalResult.value)}`;
@@ -737,6 +742,8 @@
       let failedCount = 0;
       let latestLocalPayload = {};
       let latestPayloadByAgent = {};
+      let roomEmptyOverride = false;
+      let refreshOverrideVisuals = null;
 
       function appendChatMessage(text, role = 'assistant', extraHTML = '') {
         if (!chatMessagesEl) return;
@@ -970,9 +977,13 @@
 
       if (notifRoomEmptyBtn) notifRoomEmptyBtn.addEventListener('click', () => {
         postNotification('The room is empty, maintenance team is coming ...', 'info');
+        roomEmptyOverride = true;
+        if (refreshOverrideVisuals) refreshOverrideVisuals();
       });
       if (notifRoomNormalBtn) notifRoomNormalBtn.addEventListener('click', () => {
         postNotification('Maintenance complete. Room is normal.', 'success');
+        roomEmptyOverride = false;
+        if (refreshOverrideVisuals) refreshOverrideVisuals();
       });
 
       // Initial fetch + 2s poll. Continues regardless of which tab is active so the
@@ -1623,7 +1634,7 @@
         
         const legendEl = document.getElementById('legend');
         legendEl.innerHTML = '';
-        const bits = [['#ef4444','Dist'], ['#facc15','Light'], ['#eab308','Mot'],['#dc2626','Temp'], ['#e11d48','Ir (top)'], ['#f472b6','Ir'],['#334155','TV'], ['#14b8a6','AC'], ['#6b7280','Chair'],['#22c55e','Chair (active)'], ['#3b82f6','Door']];
+        const bits = [['#ef4444','Dist'], ['#facc15','Light'], ['#eab308','Mot'],['#dc2626','Temp'], ['#e11d48','Ir (top)'], ['#f472b6','Ir'],['#334155','TV'], ['#43b6f0','AC'], ['#6b7280','Chair'],['#22c55e','Chair (active)'], ['#3b82f6','Door']];
         for (const [hex, text] of bits) {
           const span = document.createElement('span');
           span.innerHTML = `<i style="background:${hex}"></i>${text}`;
@@ -1973,7 +1984,7 @@
             ac.userData.acId = item.id || '';
             ac.userData.acLabel = item.label || item.id || 'AC';
 
-            const acLabel = makeLabelSprite(`${item.label || tiltKey || 'AC'}: —`);
+            const acLabel = makeLabelSprite(`${item.label || tiltKey || 'AC'}`);
             acLabel.userData.clickType = 'tilt';
             acLabel.userData.tiltKey = tiltKey;
             acLabel.userData.acId = item.id || '';
@@ -2162,7 +2173,7 @@
 
         function updateChairs(attrs) {
           chairVisuals.forEach(ch => {
-            const active = Number(attrs[ch.activityKey] ?? 0) > 0;
+            const active = roomEmptyOverride ? false : (Number(attrs[ch.activityKey] ?? 0) > 0);
             const hex = active ? 0x22c55e : 0x6b7280;
             const intensity = active ? 0.18 : 0.02;
             if (ch.materials) {
@@ -2181,7 +2192,7 @@
             const val = Number(attrs[tiltKey] ?? 0);
             const active = val > 0.5;
             const activeHex = 0xf472b6;
-            const idleHex = ac.baseHex ?? 0x14b8a6;
+            const idleHex = ac.baseHex ?? 0x43b6f0;
 
             if (ac.materials) {
               ac.materials.forEach(mat => {
@@ -2196,7 +2207,7 @@
               ac.mesh.getWorldPosition(p);
               ac.label.position.set(p.x, p.y + 0.4, p.z);
               const acName = ac.acLabel || ac.acId || tiltKey;
-              const next = makeLabelSprite(`${acName}: ${val.toFixed(1)}`);
+              const next = makeLabelSprite(`${acName}`);
               next.position.copy(ac.label.position);
               next.userData.clickType = 'tilt'; next.userData.tiltKey = tiltKey;
               next.userData.acId = ac.acId || ''; next.userData.acLabel = ac.acLabel || acName;
@@ -2248,15 +2259,46 @@
             missingKeys: new Set(),
             invalidIds: [],
           };
+          // Shared activate/inactivate color pair for Dist + Ir sensors:
+          //   active (value shown)  -> lighter
+          //   inactive (value hidden, i.e. dist==130 / ir==150) -> darker
+          const DIST_IR_ACTIVE_HEX = 0xfa9700;
+          const DIST_IR_INACTIVE_HEX = 0xdec092;
+          // Activate/inactivate color pair for Mot sensors:
+          //   active (value shown, value != 0) -> lighter
+          //   inactive (value hidden, value == 0) -> darker
+          const MOT_ACTIVE_HEX = 0xf7f30c;
+          const MOT_INACTIVE_HEX = 0xdbda91;
           sensorVisuals.forEach(v => {
             const result = evaluateBinding(v.fake, attrs);
             v.result = result;
             if (result.missingKey) diagnostics.missingKeys.add(result.missingKey);
             if (result.invalid) diagnostics.invalidIds.push(v.spec.id);
             v.mesh.visible = !!result.visible; v.sprite.visible = !!result.visible;
-            const intensity = result.status === 'unknown' ? 0.03 : (result.active ? (v.spec.kind === 'mot' ? 0.28 : 0.42) : (v.spec.kind === 'mot' ? 0.06 : 0.08));
-            v.mesh.material.emissiveIntensity = intensity;
-            const next = makeLabelSprite(formatSensorLabel(v.fake, result));
+            const kind = (v.spec.kind || '').toLowerCase();
+            const valueNum = toFiniteNumber(result.value);
+            let distIrActive = null;
+            if (kind === 'dist') distIrActive = roomEmptyOverride ? false : (valueNum !== 130);
+            else if (kind === 'ir') distIrActive = roomEmptyOverride ? false : (valueNum !== 150);
+            const motActive = kind === 'mot' ? (roomEmptyOverride ? false : (valueNum !== 0)) : null;
+            if (distIrActive !== null && v.mesh.material) {
+              const hex = distIrActive ? DIST_IR_ACTIVE_HEX : DIST_IR_INACTIVE_HEX;
+              v.mesh.material.color.setHex(hex);
+              v.mesh.material.emissive.setHex(hex);
+              v.mesh.material.emissiveIntensity = distIrActive ? 0.45 : 0.05;
+            } else if (motActive !== null && v.mesh.material) {
+              const hex = motActive ? MOT_ACTIVE_HEX : MOT_INACTIVE_HEX;
+              v.mesh.material.color.setHex(hex);
+              v.mesh.material.emissive.setHex(hex);
+              v.mesh.material.emissiveIntensity = motActive ? 0.35 : 0.05;
+            } else {
+              const intensity = result.status === 'unknown' ? 0.03 : (result.active ? (v.spec.kind === 'mot' ? 0.28 : 0.42) : (v.spec.kind === 'mot' ? 0.06 : 0.08));
+              v.mesh.material.emissiveIntensity = intensity;
+            }
+            const labelText = (roomEmptyOverride && (kind === 'dist' || kind === 'ir' || kind === 'mot'))
+              ? (v.spec.label || v.spec.id || 'sensor')
+              : formatSensorLabel(v.fake, result);
+            const next = makeLabelSprite(labelText);
             next.position.copy(v.sprite.position);
             scene.add(next); scene.remove(v.sprite);
             if (v.sprite.material.map) v.sprite.material.map.dispose();
@@ -2270,6 +2312,10 @@
         latestLocalAttrs = flat; latestLocalPayload = config.samplePayload || {}; latestPayloadByAgent = {};
         renderHud(flat);
         updateSensors(flat); updateDoor(flat); updateChairs(flat); updateACs(flat);
+        refreshOverrideVisuals = () => {
+          const a = latestLocalAttrs || {};
+          updateSensors(a); updateChairs(a);
+        };
         document.getElementById('panel-metrics').textContent = `Rendered sensors: ${sensorVisuals.length} / ${totalXmlSensors}`;
 
         async function poll() {
