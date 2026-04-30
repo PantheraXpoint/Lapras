@@ -43,28 +43,38 @@ class ClubHouseAgent(VirtualAgent):
         
         logger.info(f"[{self.agent_id}] ClubHouseAgent initialized with preset: {preset_mode}")
         
-        # Default sensor configuration if none provided
+        # Default sensor configuration if none provided.
+        # light_1/temperature_1 are included across all presets so threshold-driven
+        # classification (light_status, temperature_status) always has inputs to react to.
         if sensor_config is None:
             if preset_mode in ["back-read", "back-nap"]:
                 sensor_config = {
                     "infrared": ["infrared_1", "infrared_2"],
-                    "distance": ["distance_1", "distance_2"]
+                    "distance": ["distance_1", "distance_2"],
+                    "light": ["light_1"],
+                    "temperature": ["temperature_1"],
                 }
             elif preset_mode in ["front-read", "front-nap"]:
                 sensor_config = {
                     "infrared": ["infrared_3", "infrared_4"],
-                    "distance": ["distance_3", "distance_4"]
+                    "distance": ["distance_3", "distance_4"],
+                    "light": ["light_1"],
+                    "temperature": ["temperature_1"],
                 }
             elif preset_mode in ["all-normal", "all-clean"]:
                 sensor_config = {
                     "infrared": ["infrared_1", "infrared_2", "infrared_3", "infrared_4"],
-                    "distance": ["distance_1", "distance_2", "distance_3", "distance_4"]
+                    "distance": ["distance_1", "distance_2", "distance_3", "distance_4"],
+                    "light": ["light_1"],
+                    "temperature": ["temperature_1"],
                 }
             else:
                 # Default fallback
                 sensor_config = {
                     "infrared": ["infrared_1", "infrared_2"],
-                    "distance": ["distance_1", "distance_2"]
+                    "distance": ["distance_1", "distance_2"],
+                    "light": ["light_1"],
+                    "temperature": ["temperature_1"],
                 }
         
         self.sensor_config = sensor_config
