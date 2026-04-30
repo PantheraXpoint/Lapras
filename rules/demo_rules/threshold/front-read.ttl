@@ -1,0 +1,116 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix lapras: <http://lapras.org/rule/> .
+
+# --- Front Reading Mode — Threshold-Aware Rules ---
+# Agent: "front" | Light config: bri=250, hue=200 (cool, reading) | Aircon: device 322207, temp_up
+# Light branch:  near + dark  → light on;  far OR near + bright → light off
+# Aircon branch: near + hot   → aircon on; far OR near + cool   → aircon off
+
+# ── Shared conditions ──────────────────────────────────────────────────────────
+
+lapras:TFR_NearCond
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:TFR_FarCond
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:TFR_DarkCond
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "dark" .
+
+lapras:TFR_BrightCond
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "bright" .
+
+lapras:TFR_HotCond
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "hot" .
+
+lapras:TFR_CoolCond
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "cool" .
+
+lapras:TFR_LightOffCond
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:TFR_LightOnCond
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:TFR_AirconOffCond
+    lapras:hasSensor "aircon_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:TFR_AirconOnCond
+    lapras:hasSensor "aircon_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+# ── Actions ────────────────────────────────────────────────────────────────────
+
+lapras:TFR_LightOnAction  lapras:hasStateUpdate '{"light_power": "on"}' .
+lapras:TFR_LightOffAction lapras:hasStateUpdate '{"light_power": "off"}' .
+lapras:TFR_AirconOnAction  lapras:hasStateUpdate '{"aircon_power": "on"}' .
+lapras:TFR_AirconOffAction lapras:hasStateUpdate '{"aircon_power": "off"}' .
+
+# ── Light branch ────────────────────────────────────────────────────────────────
+
+# Light ON: person near AND ambient light is dark
+lapras:TFR_LightOnRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:TFR_NearCond ;
+    lapras:hasCondition lapras:TFR_LightOffCond ;
+    lapras:hasCondition lapras:TFR_DarkCond ;
+    lapras:hasAction lapras:TFR_LightOnAction .
+
+# Light OFF: no one present
+lapras:TFR_LightOffFarRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:TFR_LightOnCond ;
+    lapras:hasCondition lapras:TFR_FarCond ;
+    lapras:hasAction lapras:TFR_LightOffAction .
+
+# Light OFF: person near but ambient already bright
+lapras:TFR_LightOffBrightRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:TFR_LightOnCond ;
+    lapras:hasCondition lapras:TFR_NearCond ;
+    lapras:hasCondition lapras:TFR_BrightCond ;
+    lapras:hasAction lapras:TFR_LightOffAction .
+
+# ── Aircon branch ───────────────────────────────────────────────────────────────
+
+# Aircon ON: person near AND temperature is hot
+lapras:TFR_AirconOnRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:TFR_NearCond ;
+    lapras:hasCondition lapras:TFR_AirconOffCond ;
+    lapras:hasCondition lapras:TFR_HotCond ;
+    lapras:hasAction lapras:TFR_AirconOnAction .
+
+# Aircon OFF: no one present
+lapras:TFR_AirconOffFarRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:TFR_AirconOnCond ;
+    lapras:hasCondition lapras:TFR_FarCond ;
+    lapras:hasAction lapras:TFR_AirconOffAction .
+
+# Aircon OFF: person near but temperature is cool
+lapras:TFR_AirconOffCoolRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:TFR_AirconOnCond ;
+    lapras:hasCondition lapras:TFR_NearCond ;
+    lapras:hasCondition lapras:TFR_CoolCond ;
+    lapras:hasAction lapras:TFR_AirconOffAction .

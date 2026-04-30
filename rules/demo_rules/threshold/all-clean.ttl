@@ -1,0 +1,83 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix lapras: <http://lapras.org/rule/> .
+
+# --- All-Area Clean Mode — Threshold-Aware Rules ---
+# Agent: "all" | Light config: bri=250, hue=200, sat=250 (bright, cool, high-sat for cleaning)
+# Light branch:  near + dark → light on; far OR near + bright → light off
+# Aircon branch: FORCED OFF always (clean mode semantic — no aircon-on rule)
+
+# ── Shared conditions ──────────────────────────────────────────────────────────
+
+lapras:TAC_NearCond
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:TAC_FarCond
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:TAC_DarkCond
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "dark" .
+
+lapras:TAC_BrightCond
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "bright" .
+
+lapras:TAC_LightOffCond
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:TAC_LightOnCond
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:TAC_AirconOnCond
+    lapras:hasSensor "aircon_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+# ── Actions ────────────────────────────────────────────────────────────────────
+
+lapras:TAC_LightOnAction   lapras:hasStateUpdate '{"light_power": "on"}' .
+lapras:TAC_LightOffAction  lapras:hasStateUpdate '{"light_power": "off"}' .
+lapras:TAC_AirconOffAction lapras:hasStateUpdate '{"aircon_power": "off"}' .
+
+# ── Light branch ────────────────────────────────────────────────────────────────
+
+# Light ON: person near AND ambient light is dark (maximum brightness for cleaning visibility)
+lapras:TAC_LightOnRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAC_NearCond ;
+    lapras:hasCondition lapras:TAC_LightOffCond ;
+    lapras:hasCondition lapras:TAC_DarkCond ;
+    lapras:hasAction lapras:TAC_LightOnAction .
+
+# Light OFF: no one present
+lapras:TAC_LightOffFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAC_LightOnCond ;
+    lapras:hasCondition lapras:TAC_FarCond ;
+    lapras:hasAction lapras:TAC_LightOffAction .
+
+# Light OFF: person near but ambient already bright
+lapras:TAC_LightOffBrightRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAC_LightOnCond ;
+    lapras:hasCondition lapras:TAC_NearCond ;
+    lapras:hasCondition lapras:TAC_BrightCond ;
+    lapras:hasAction lapras:TAC_LightOffAction .
+
+# ── Aircon branch — forced off ──────────────────────────────────────────────────
+# No aircon-on rule. If aircon was on before mode switch, force it off immediately.
+
+lapras:TAC_AirconForceOffRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAC_AirconOnCond ;
+    lapras:hasAction lapras:TAC_AirconOffAction .

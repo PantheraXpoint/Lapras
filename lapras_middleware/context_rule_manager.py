@@ -817,6 +817,31 @@ class ContextRuleManager:
             else:
                 logger.debug(f"[{self.service_id}] ✅ NO ACTION: No state change needed for agent '{agent_id}' (already {current_power_state})")
 
+            # ── Per-subsystem dispatch for threshold-aware rules ──────────────────
+            # Threshold rule files set light_power / aircon_power independently so
+            # each subsystem can be toggled by its own sensor condition branch without
+            # coupling to the other. Dispatch only fires when the rule decision differs
+            # from the agent's last-reported subsystem state.
+            rule_light_power = raw_rule_decision.get("light_power")
+            current_light_power = current_state.get("light_power", "off")
+            if rule_light_power in ("on", "off") and rule_light_power != current_light_power:
+                lp_cmd = "turn_on" if rule_light_power == "on" else "turn_off"
+                logger.info(
+                    f"[{self.service_id}] 🚨 SUBSYSTEM ACTION (light) for '{agent_id}': "
+                    f"{current_light_power} → {rule_light_power}"
+                )
+                self._send_action_command(agent_id, lp_cmd, parameters={"target": "light"})
+
+            rule_aircon_power = raw_rule_decision.get("aircon_power")
+            current_aircon_power = current_state.get("aircon_power", "off")
+            if rule_aircon_power in ("on", "off") and rule_aircon_power != current_aircon_power:
+                ap_cmd = "turn_on" if rule_aircon_power == "on" else "turn_off"
+                logger.info(
+                    f"[{self.service_id}] 🚨 SUBSYSTEM ACTION (aircon) for '{agent_id}': "
+                    f"{current_aircon_power} → {rule_aircon_power}"
+                )
+                self._send_action_command(agent_id, ap_cmd, parameters={"target": "aircon"})
+
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
 

@@ -1,0 +1,117 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix lapras: <http://lapras.org/rule/> .
+
+# --- All-Area Normal Mode — Threshold-Aware Rules ---
+# Agent: "all" | Light config: bri=100, hue=100 (warm) | Aircon: devices 164793+322207, both_on
+# Light branch:  near + dark  → light on;  far OR near + bright → light off
+# Aircon branch: near + hot   → aircon on; far OR near + cool   → aircon off
+
+# ── Shared conditions ──────────────────────────────────────────────────────────
+
+lapras:TAN_NearCond
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:TAN_FarCond
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:TAN_DarkCond
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "dark" .
+
+lapras:TAN_BrightCond
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "bright" .
+
+lapras:TAN_HotCond
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "hot" .
+
+lapras:TAN_CoolCond
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "cool" .
+
+lapras:TAN_LightOffCond
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:TAN_LightOnCond
+    lapras:hasSensor "light_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:TAN_AirconOffCond
+    lapras:hasSensor "aircon_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:TAN_AirconOnCond
+    lapras:hasSensor "aircon_power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+# ── Actions ────────────────────────────────────────────────────────────────────
+
+lapras:TAN_LightOnAction  lapras:hasStateUpdate '{"light_power": "on"}' .
+lapras:TAN_LightOffAction lapras:hasStateUpdate '{"light_power": "off"}' .
+lapras:TAN_AirconOnAction  lapras:hasStateUpdate '{"aircon_power": "on"}' .
+lapras:TAN_AirconOffAction lapras:hasStateUpdate '{"aircon_power": "off"}' .
+
+# ── Light branch ────────────────────────────────────────────────────────────────
+
+# Light ON: person near AND ambient light is dark
+lapras:TAN_LightOnRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAN_NearCond ;
+    lapras:hasCondition lapras:TAN_LightOffCond ;
+    lapras:hasCondition lapras:TAN_DarkCond ;
+    lapras:hasAction lapras:TAN_LightOnAction .
+
+# Light OFF: no one present
+lapras:TAN_LightOffFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAN_LightOnCond ;
+    lapras:hasCondition lapras:TAN_FarCond ;
+    lapras:hasAction lapras:TAN_LightOffAction .
+
+# Light OFF: person near but ambient already bright
+lapras:TAN_LightOffBrightRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAN_LightOnCond ;
+    lapras:hasCondition lapras:TAN_NearCond ;
+    lapras:hasCondition lapras:TAN_BrightCond ;
+    lapras:hasAction lapras:TAN_LightOffAction .
+
+# ── Aircon branch ───────────────────────────────────────────────────────────────
+# Normal mode: both aircons (164793 + 322207) managed together via agent's both_on config
+
+# Aircon ON: person near AND temperature is hot
+lapras:TAN_AirconOnRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAN_NearCond ;
+    lapras:hasCondition lapras:TAN_AirconOffCond ;
+    lapras:hasCondition lapras:TAN_HotCond ;
+    lapras:hasAction lapras:TAN_AirconOnAction .
+
+# Aircon OFF: no one present
+lapras:TAN_AirconOffFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAN_AirconOnCond ;
+    lapras:hasCondition lapras:TAN_FarCond ;
+    lapras:hasAction lapras:TAN_AirconOffAction .
+
+# Aircon OFF: person near but temperature is cool
+lapras:TAN_AirconOffCoolRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:TAN_AirconOnCond ;
+    lapras:hasCondition lapras:TAN_NearCond ;
+    lapras:hasCondition lapras:TAN_CoolCond ;
+    lapras:hasAction lapras:TAN_AirconOffAction .
