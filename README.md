@@ -15,8 +15,15 @@ lapras-py/
 │   ├── aircon_agent.py       # AirconAgent (VirtualAgent)
 │   ├── infrared_sensor_agent.py  # InfraredSensorAgent (SensorAgent)
 │   └── ...
-├── start_aircon_agent.py     # Start AirconAgent
-├── start_infrared_sensor.py  # Start InfraredSensorAgent
-├── start_context_rule_manager.py  # Start ContextRuleManager
-└── test_new_architecture.py  # Test script
+├── scripts/                  # Runnable entry points (run via `python -m scripts.<name>`)
+│   ├── start_aircon_agent.py     # Start AirconAgent
+│   ├── start_infrared_sensor.py  # Start InfraredSensorAgent
+│   ├── start_context_rule_manager.py  # Start ContextRuleManager
+│   └── ...                        # other start_*.py + run_agent.py
+└── dashboard_interface/      # Streamlit dashboard + its backend modules
+    ├── dashboard_app.py          # `streamlit run dashboard_interface/dashboard_app.py`
+    └── ...
 ```
+
+> **Running an agent:** entry-point scripts now live in `scripts/` and are launched
+> as modules from the repo root, e.g. `python -m scripts.start_aircon_agent`.

@@ -30,24 +30,34 @@ An MQTT broker must be reachable (default `143.248.55.82:1883`).
 
 ## Quick Start
 
+> Run all commands from the `smart_home_gs/` directory. Entry-point scripts live
+> in `scripts/`; the browser UI lives in `web/`.
+
 ### 1. Live mode (MQTT + sensors required)
 
 ```bash
-python3 start_3d_visualization_stream.py \
+python3 scripts/start_3d_visualization_stream.py \
   --mqtt-broker 143.248.55.82 \
   --mqtt-port 1883 \
   --http-port 8765 \
-  --caption-model qwenlm \
-  --caption-gpus 1 \
+  --caption-base-url http://localhost:8000/v1 \
+  --caption-model Qwen/Qwen3-8B \
   --caption-window-sec 30
 ```
 
 Open [http://localhost:8765](http://localhost:8765) in a browser.
 
+> **LLM endpoints.** Captioning and the RAG chat share one hosted vLLM endpoint
+> per server process (the chat reuses the caption engine's client). Point it at
+> any served model with `--caption-base-url` (or the `LLM_BASE_URL` env var); the
+> offline tools below take `--base-url`. We currently host two vLLM servers on
+> `http://localhost:8000/v1` and `http://localhost:8001/v1` — use whichever you
+> want per command.
+
 ### 2. Simulated mode (no MQTT needed)
 
 ```bash
-python3 start_3d_visualization_simulated_stream.py --http-port 8765
+python3 scripts/start_3d_visualization_simulated_stream.py --http-port 8765
 ```
 
 Cycles through 3 synthetic sensor scenarios. Open the same URL.
@@ -55,7 +65,7 @@ Cycles through 3 synthetic sensor scenarios. Open the same URL.
 ### 3. Log sensor stream
 
 ```bash
-python3 sensor_stream_logger.py \
+python3 scripts/sensor_stream_logger.py \
   --minutes 5 \
   --broker 143.248.55.82 \
   --output logs/my_stream.json
@@ -64,17 +74,20 @@ python3 sensor_stream_logger.py \
 ### 4. Offline captioning from logs
 
 ```bash
-python3 sensor_caption_infer.py \
+python3 scripts/sensor_caption_infer.py \
   --input logs/sensor_stream_20260330_194218.json \
   --output logs/captions.json \
-  --model qwenlm \
+  --base-url http://localhost:8001/v1 \
+  --model Qwen/Qwen3-8B \
   --window-sec 30
 ```
 
 ### 5. Test captions (3 fixed cases)
 
 ```bash
-python3 generate_three_case_captions.py --model qwenlm --gpus 1
+python3 scripts/generate_three_case_captions.py \
+  --base-url http://localhost:8001/v1 \
+  --model Qwen/Qwen3-8B
 ```
 
 ## RAG Chat Setup
@@ -92,7 +105,7 @@ This installs: `pymilvus`, `sentence-transformers`, `einops`, `timm`, `python-da
 ### Backfill existing captions into Milvus
 
 ```bash
-python3 index_captions_to_milvus.py --logs-dir logs/
+python3 scripts/index_captions_to_milvus.py --logs-dir logs/
 ```
 
 Options:
@@ -109,7 +122,7 @@ Options:
 Just start the server normally. If RAG dependencies are installed, the chat endpoint activates automatically. New captions are indexed in real time.
 
 ```bash
-python3 start_3d_visualization_stream.py \
+python3 scripts/start_3d_visualization_stream.py \
   --mqtt-broker 143.248.55.82 \
   --http-port 8765
 ```
@@ -189,27 +202,33 @@ curl -s -X POST http://localhost:8765/api/chat \
 
 ```
 smart_home_gs/
-├── start_3d_visualization_stream.py        # Main entry point (live)
-├── start_3d_visualization_simulated_stream.py  # Simulated mode
-├── sensor_stream_logger.py                 # MQTT stream logger
-├── sensor_caption_infer.py                 # Offline captioning
-├── generate_three_case_captions.py         # 3 fixed test cases
-├── inspect_caption_prompt_input.py         # Debug caption prompts
-├── index_captions_to_milvus.py             # Backfill captions to Milvus
+├── README.md
 ├── requirements-rag.txt                    # RAG dependencies
+│
+├── scripts/                                # Runnable entry points (run from smart_home_gs/)
+│   ├── start_3d_visualization_stream.py        # Main entry point (live)
+│   ├── start_3d_visualization_simulated_stream.py  # Simulated mode
+│   ├── sensor_stream_logger.py                 # MQTT stream logger
+│   ├── sensor_caption_infer.py                 # Offline captioning
+│   ├── generate_three_case_captions.py         # 3 fixed test cases
+│   ├── inspect_caption_prompt_input.py         # Debug caption prompts
+│   └── index_captions_to_milvus.py             # Backfill captions to Milvus
+│
+├── web/                                    # Browser UI (served by the stream servers)
+│   ├── index.html                          # Main UI: room selector → the 2 rooms below
+│   ├── room_seminarroom.html / .xml        # Room 1 (Seminar Room, A-Frame)
+│   ├── room_loungeroom.html / .xml         # Room 2 (Lounge Room, Three.js)
+│   ├── layout_index.png
+│   └── assets/                             # 3D furniture models (.glb)
 │
 ├── rag/                                    # RAG subsystem
 │   ├── embeddings.py                       # jina-clip-v1 embedding layer
 │   ├── milvus_store.py                     # Milvus Lite vector store
 │   └── query_engine.py                     # Classify → retrieve → synthesize
 │
-├── index.html                              # Room selection dashboard
-├── visualize_smart_room_aframe.html        # 3D visualization + chat UI
-├── smart_room.xml                          # N1 Lab room definition
-├── new_smart_room.xml                      # Alternative room layout
-│
-├── assets/                                 # 3D furniture models (.glb)
-├── aframe/                                 # A-Frame v1.7.1 framework
+├── docs/                                   # Notes, summaries, plan files
+├── aframe/                                 # A-Frame framework (vendored, untracked)
+├── doore/                                  # Dataset (untracked)
 ├── logs/                                   # Sensor stream logs & captions
 └── data/                                   # Milvus DB (created at runtime)
 ```

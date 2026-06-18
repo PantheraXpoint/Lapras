@@ -2,9 +2,9 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 # from utils.new_dashboard_subscriber import EnhancedDashboardSubscriber as eds
-from test_sensor_config_dashboard import InteractiveSensorConfigDashboard
-from test_dashboard_manual_control import InteractiveManualControlDashboard
-from test_rule_agent import RuleAgentTester
+from sensor_config_dashboard import InteractiveSensorConfigDashboard
+from manual_control_dashboard import InteractiveManualControlDashboard
+from rule_agent_tester import RuleAgentTester
 # from utils.new_dashboard_subscriber import InteractiveManualControlDashboard as dashboardsubscriber
 from lapras_middleware.event_db import get_event_db, query_event_db
 from design import MeetingRoomDesign

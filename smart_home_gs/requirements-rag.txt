@@ -3,3 +3,4 @@ sentence-transformers>=2.7.0
 einops
 timm
 python-dateutil>=2.8.2
+openai>=1.0.0
