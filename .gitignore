@@ -46,3 +46,8 @@ smart_home_gs/doore/
 
 # Vendored A-Frame clone (~1GB, has its own .git) — not tracked.
 smart_home_gs/aframe/
+
+# dataset_generator generated data outputs (json/csv) — not tracked.
+dataset_generator/*.json
+dataset_generator/*.csv
+dataset_generator/*.jsonl
